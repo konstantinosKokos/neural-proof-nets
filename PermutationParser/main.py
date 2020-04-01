@@ -3,6 +3,8 @@ from PermutationParser.neural.utils import *
 from PermutationParser.neural.schedules import *
 from PermutationParser.data.sample import load_stored
 
+from torch.nn import KLDivLoss
+
 import subprocess
 import os
 import sys
@@ -33,7 +35,7 @@ def load_model(parser: Parser, load: str, **kwargs) -> Tuple[int, Dict, int]:
 def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 64,
          val_batch: int = 128, device: str = 'cuda', version: Optional[str] = None,
          save_to_dir: Optional[str] = None) \
-        -> Tuple[DataLoader, DataLoader, int, Parser, str]:
+        -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     if version is None:
         version = subprocess.check_output(['git', 'describe', '--always'], cwd='./PermutationParser').strip().decode()
     if save_to_dir is not None:
@@ -48,16 +50,18 @@ def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 6
     val_size = round(0.95 * len(samples))
     trainset = samples[:train_size]
     valset = sorted(samples[train_size:val_size], key=lambda sample: len(sample.polish))
+    testset = sorted(samples[val_size:], key=lambda sample: len(sample.polish))
     train_dl = make_dataloader([sample for sample in trainset if len(sample.polish) <= max_len], train_batch)
     val_dl = make_dataloader([sample for sample in valset if len(sample.polish) <= max_len], val_batch, shuffle=False)
+    test_dl = make_dataloader(testset, val_batch, shuffle=False)
     nbatches = get_nbatches(max_len, trainset, train_batch)
     print('Read data.')
     parser = Parser(AtomTokenizer(samples), Tokenizer(), 768, device)
     print('Initialized model.')
-    return train_dl, val_dl, nbatches, parser, version
+    return train_dl, val_dl, test_dl, nbatches, parser, version
 
 
-def init_pere(datapath: str, save_to_dir: str) -> Tuple[DataLoader, DataLoader, int, Parser, str]:
+def init_pere(datapath: str, save_to_dir: str) -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     return init(datapath, 95, 256, 512, 'cuda', version='pere', save_to_dir=save_to_dir)
 
 
@@ -65,9 +69,9 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
           version: Optional[str] = None, save_to_dir: Optional[str] = None):
 
     if pere:
-        train_dl, val_dl, nbatches, parser, version = init_pere(data_path, save_to_dir)
+        train_dl, val_dl, test_dl, nbatches, parser, version = init_pere(data_path, save_to_dir)
     else:
-        train_dl, val_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
+        train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
 
     schedule = make_cosine_schedule_with_restarts(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
                                                   restart_every=restart_epochs * nbatches,
