@@ -87,6 +87,8 @@ class Parser(Module):
         return encoder_output
 
     def encode_atoms(self, atom_reprs: Tensor, atom_mask: LongTensor) -> Tensor:
+        if atom_reprs.shape[1] == 0:
+            return atom_reprs
         return self.atom_encoder((atom_reprs, atom_mask))[0]
 
     def decode_train(self, lexical_token_ids: LongTensor, symbol_ids: LongTensor) -> Tensor:
