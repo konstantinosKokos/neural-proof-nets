@@ -385,7 +385,7 @@ def operator_invariance(premises: WordTypes) -> int:
 
 
 def invariance_check(premises: WordTypes, goal: WordType) -> bool:
-    premises = list(filter(lambda type_: type_ != AtomicType('_'), premises))
+    premises = list(filter(lambda type_: str(type_)[0] != '_', premises))
     inferred = literal_invariance(premises)
     if list(inferred.values()) != [1]:
         return False
