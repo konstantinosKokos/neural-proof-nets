@@ -46,15 +46,18 @@ class Analysis:
             return [], []
         return self.positive_ids, self.negative_ids
 
-    def fill_matches(self, matrices: List[List[List[bool]]]):
+    def fill_matches(self, matrices: List[ints]):
         pos: ints
         neg: ints
-        match: List[List[bool]]
+        match: ints
         pnet: Dict[int, int] = dict()
+
+        if self.positive_ids is None or self.negative_ids is None:
+            return None
 
         for pos, neg, match in zip(self.positive_ids, self.negative_ids, matrices):
             for i, p in enumerate(pos):
-                n_idx = match[i].index(True)
+                n_idx = match[i]
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
         self.proof = pnet

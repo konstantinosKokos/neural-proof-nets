@@ -271,7 +271,7 @@ class Parser(Module):
 
         links_: List[List[Tensor]]
         links_ = self.link_slow(output_reprs[:, :max(atom_lens)], atom_mask, positive_ids, negative_ids)
-        links = [[link.round().bool().tolist()[0] for link in sent] for sent in links_]
+        links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
         for pa, link in zip(partial_analyses, links):
             pa.fill_matches(link)
         return partial_analyses
