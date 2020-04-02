@@ -16,27 +16,18 @@ OWordTypes = List[OWordType]
 
 @dataclass(init=False)
 class Analysis:
-    words: Optional[strs]
-    types: Optional[WordTypes]
-    conclusion: Optional[WordType]
-    polishes: Optional[strs]
-    atom_set: Optional[Atoms]
-    positive_ids: Optional[List[ints]]
-    negative_ids: Optional[List[ints]]
-    idx_to_polish: Optional[Dict[int, int]]
-    proof: Optional[Dict[int, int]]
+    words: strs
+    types: Optional[WordTypes] = None
+    conclusion: Optional[WordType] = None
+    polishes: Optional[strs] = None
+    atom_set: Optional[Atoms] = None
+    positive_ids: Optional[List[ints]] = None
+    negative_ids: Optional[List[ints]] = None
+    idx_to_polish: Optional[Dict[int, int]] = None
+    proof: Optional[Dict[int, int]] = None
 
-    def __init__(self, words=None, types=None, conclusion=None, polishes=None, atom_set=None,
-                 positive_ids=None, negative_ids=None, idx_to_polish=None, proof=None):
+    def __init__(self, words=strs):
         self.words = words
-        self.types = types
-        self.conclusion = conclusion
-        self.polishes = polishes
-        self.atom_set = atom_set
-        self.positive_ids = positive_ids
-        self.negative_ids = negative_ids
-        self.idx_to_polish = idx_to_polish
-        self.proof = proof
 
     def __len__(self):
         return len(self.polishes) if self.polishes is not None else 0
