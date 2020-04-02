@@ -218,8 +218,8 @@ class Parser(Module):
         return output_symbols, decoder_output
 
     @torch.no_grad()
-    def decode_beam(self, lexical_token_ids: LongTensor, beam_width: int, max_decode_length: Optional[int] = None,
-                    length_factor: int = 5, stop_at: Optional[ints] = None):
+    def decode_beam(self, lexical_token_ids: LongTensor, beam_width: int, stop_at: ints,
+                    max_decode_length: Optional[int] = None, length_factor: int = 5):
 
         def count_sep(x: Tensor, dim: int) -> Tensor:
             sep = self.atom_tokenizer.sep_token_id
@@ -230,6 +230,8 @@ class Parser(Module):
             return idx // beam_width, idx - (idx // beam_width) * beam_width
 
         b, s_in = lexical_token_ids.shape
+
+        stop_at = torch.tensor(stop_at, dtype=torch.long, device=self.device)
 
         if max_decode_length is None:
             s_out = length_factor * s_in
@@ -249,15 +251,19 @@ class Parser(Module):
         sos_tokens = sos_tokens.unsqueeze(1)
         decoder_output = torch.empty(b, beam_width, s_out, self.dim).to(self.device)
         output_symbols = torch.empty(b, beam_width, s_out, dtype=torch.long).to(self.device)
-
         beam_scores = torch.zeros(b, beam_width, device=self.device)
+
+        valid_beams = torch.ones(b, beam_width, dtype=torch.bool, device=self.device)
+
+        _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer) + 1, device=self.device) * -1e03
+        _masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
 
         for t in range(s_out):
             # timestep begins with
             # decoder_input:    B K t+1 D
             # decoder output    B K t D
             # output symbols    B K t
-            # beam scores       B
+            # beam scores       B K
 
             # the next repr of each batch-beam combination
             repr_t = torch.empty(b, beam_width, self.dim, device=self.device)
@@ -268,8 +274,13 @@ class Parser(Module):
 
             logprobs_t = self.embedder.invert(repr_t).log_softmax(dim=-1)
 
+            sep_counts = count_sep(output_symbols, dim=-1)
+            valid_beams = sep_counts < stop_at
+
             if t == 0:
                 logprobs_t[:, 1:] = -1e3  # hack first decoder step
+
+            logprobs_t = torch.where(valid_beams.unsqueeze(-1), logprobs_t, _masked_probs)
 
             # lists of K tensors of shape B, K
             # local_scores[i] contains the K2 best branches originating from branch K1
@@ -284,8 +295,6 @@ class Parser(Module):
             best_source_idxes: List[List[Tuple[int, int]]]  # B outer elements, K inner elements indexing (src, tgt)
             best_source_idxes = [[backward_index(idx) for idx in best_source] for best_source in best_sources.tolist()]
 
-            sep_counts = count_sep(output_symbols, dim=-1)
-
             new_decoder_output = torch.empty(b, beam_width, s_out, self.dim, device=self.device)
             new_decoder_input = torch.empty(b, beam_width, t+1, self.dim, device=self.device)
             new_output_symbols = torch.empty(b, beam_width, s_out, dtype=torch.long, device=self.device)
@@ -294,13 +303,6 @@ class Parser(Module):
                 for beam in range(beam_width):
                     origin = best_source_idxes[sent][beam][0]
                     target = best_source_idxes[sent][beam][1]
-                    if stop_at is not None and sep_counts[sent, origin] == stop_at[sent]:
-                        new_output_symbols[sent, beam, :t] = output_symbols[sent, origin, :t]
-                        new_output_symbols[sent, beam, t] = self.atom_tokenizer.pad_token_id
-                        new_decoder_output[sent, beam, :t] = decoder_output[sent, origin, :t]
-                        new_decoder_output[sent, beam, t] = 0.
-                        new_decoder_input[sent, beam] = decoder_input[sent, beam]
-                        continue
                     new_decoder_output[sent, beam, :t] = decoder_output[sent, origin, :t]
                     new_decoder_output[sent, beam, t] = repr_t[sent, origin]
                     new_decoder_input[sent, beam, :t+1] = decoder_input[sent, origin, :t+1]
@@ -372,6 +374,8 @@ class Parser(Module):
                                                         beam_width=beam_size, stop_at=sent_lens)
             type_preds = type_preds.tolist()
 
+        import pdb
+        pdb.set_trace()
         # filter decoded atoms that count at least as many types as words
         atom_seqs = self.atom_tokenizer.convert_batch_ids_to_polish(type_preds, sent_lens)
         partial_analyses = self.type_parser.make_batch_partial_analyses(sents, atom_seqs)
