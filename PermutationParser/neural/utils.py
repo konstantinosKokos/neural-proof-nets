@@ -1,6 +1,4 @@
-from functools import partial
-from itertools import chain, compress, count, islice
-from operator import eq
+from itertools import chain
 from typing import *
 
 import torch
@@ -112,7 +110,7 @@ class AtomTokenizer(object):
                     for ids, length in zip(batch_ids, max_lens)]
         return [self.convert_ids_to_atoms(ids) for ids in batch_ids]
 
-    def convert_batch_ids_to_polish(self, batch_ids: Iterable[Iterable[int]],
+    def convert_batch_ids_to_polish(self, batch_ids: List[List[int]],
                                     max_lens: ints) -> List[Optional[List[strs]]]:
         sents = [self.drop_padded_atoms(self.convert_ids_to_atoms(ids), length)
                  for ids, length in zip(batch_ids, max_lens)]
@@ -120,9 +118,7 @@ class AtomTokenizer(object):
 
     @staticmethod
     def drop_padded_atoms(atoms: Iterable[str], max_len: int, sep: str = '[SEP]') -> Optional[strs]:
-        sep_ids = compress(count(), map(partial(eq, sep), atoms))
-        max_atom_len = next(islice(sep_ids, max_len, None), -1)
-        if max_atom_len == -1:
+        if len(list(filter(lambda x: x == sep, atoms))) < max_len:
             return None
         return ' '.join(atoms[1:]).split(f' {sep} ')[:max_len]  # , max_atom_len + 3  # +sos+sep+right-inc
 
