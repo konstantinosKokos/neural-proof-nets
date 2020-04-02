@@ -253,8 +253,6 @@ class Parser(Module):
         output_symbols = torch.empty(b, beam_width, s_out, dtype=torch.long).to(self.device)
         beam_scores = torch.zeros(b, beam_width, device=self.device)
 
-        valid_beams = torch.ones(b, beam_width, dtype=torch.bool, device=self.device)
-
         _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer) + 1, device=self.device) * -1e03
         _masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
 
@@ -277,6 +275,9 @@ class Parser(Module):
             sep_counts = count_sep(output_symbols, dim=-1)
             valid_beams = sep_counts < stop_at
 
+            if not valid_beams.flatten().any():
+                break
+
             if t == 0:
                 logprobs_t[:, 1:] = -1e3  # hack first decoder step
 
@@ -297,12 +298,12 @@ class Parser(Module):
 
             new_decoder_output = torch.empty(b, beam_width, s_out, self.dim, device=self.device)
             new_decoder_input = torch.empty(b, beam_width, t+1, self.dim, device=self.device)
-            new_output_symbols = torch.empty(b, beam_width, s_out, dtype=torch.long, device=self.device)
+            new_output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long, device=self.device)
 
             for sent in range(b):
                 for beam in range(beam_width):
-                    origin = best_source_idxes[sent][beam][0]
-                    target = best_source_idxes[sent][beam][1]
+                    origin, target = best_source_idxes[sent][beam]
+
                     new_decoder_output[sent, beam, :t] = decoder_output[sent, origin, :t]
                     new_decoder_output[sent, beam, t] = repr_t[sent, origin]
                     new_decoder_input[sent, beam, :t+1] = decoder_input[sent, origin, :t+1]
@@ -322,7 +323,7 @@ class Parser(Module):
                 next_embedding = (next_embedding + pos_encodings[:, t+1:t+2].repeat(1, beam_width, 1)).unsqueeze(2)
                 decoder_input = torch.cat([decoder_input, next_embedding], dim=2)
         output_symbols = torch.cat([sos_tokens.unsqueeze(1).repeat(1, beam_width, 1), output_symbols], dim=2)
-        return output_symbols, decoder_output.view(b, beam_width, s_out, self.dim)
+        return output_symbols, decoder_output.view(b, beam_width, -1, self.dim)
 
     def train_batch(self, samples: List[Sample], loss_fn: Module, optimizer: Optimizer, max_difficulty: int = 20,
                     linking_weight: float = 0.5) -> Tuple[float, float]:
