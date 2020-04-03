@@ -26,8 +26,15 @@ class Analysis:
     idx_to_polish: Optional[Dict[int, int]] = None
     proof: Optional[Dict[int, int]] = None
 
-    def __init__(self, words=strs):
+    def __init__(self, words, types, conclusion, polishes, atom_set, positive_ids, negative_ids, idx_to_polish):
         self.words = words
+        self.types = types
+        self.conclusion = conclusion
+        self.polishes = polishes
+        self.atom_set = atom_set
+        self.positive_ids = positive_ids
+        self.negative_ids = negative_ids
+        self.idx_to_polish = idx_to_polish
 
     def __len__(self):
         return len(self.polishes) if self.polishes is not None else 0
@@ -59,25 +66,24 @@ class TypeParser(object):
         self.operators = {k for k in atom_tokenizer.atom_map.keys() if k.lower() == k and k != '_'}
         self.operator_classes = {k: BoxType if k in ModDeps else DiamondType for k in self.operators if k != '→'}
 
-    def make_partial_analysis(self, sentence: str, polishes: List[strs]) -> Analysis:
-        analysis = Analysis(words=sentence.split())
-        types = self.sent_to_types(polishes)
-        if types is not None:
-            analysis.types = types[1:]
-            analysis.conclusion = types[0]
-        polarized = self.polarize_sent(types)
-        atoms_and_indices = self.get_atomset_and_indices(polarized)
-        if atoms_and_indices is not None:
-            polished, atom_set, positives, negatives, polish_from_idx = atoms_and_indices
-            analysis.polishes = polished
-            analysis.atom_set = atom_set
-            analysis.positive_ids = positives
-            analysis.negative_ids = negatives
-            analysis.idx_to_polish = polish_from_idx
-        return analysis
-
-    def make_batch_partial_analyses(self, sents: List[str], polishes: List[List[strs]]) -> List[Analysis]:
-        return [self.make_partial_analysis(s, p) for s, p in zip(sents, polishes)]
+    def analyze_beam_batch(self, sents: strs, polishes: List[List[Optional[List[strs]]]]) \
+            -> List[Tuple[Tuple[int, int], int, Analysis]]:
+        typings: List[List[Optional[OWordTypes]]]
+        typings = [[self.sent_to_types(polish) for polish in beam] for beam in polishes]
+        polarized: List[List[Optional[OWordTypes]]]
+        polarized = [[self.polarize_sent(sent) for sent in beam] for beam in typings]
+        atoms_and_indices = [[self.get_atomset_and_indices(sent) for sent in beam] for beam in polarized]
+        valid_for_linking = [(s, b) for s in range(len(atoms_and_indices)) for b in range(len(atoms_and_indices[s]))
+                             if atoms_and_indices[s][b] is not None]
+        return [
+            ((s, b),
+             len(atoms_and_indices[s][b][0]),
+             Analysis(words=sents[s], types=typings[s][b][1:], conclusion=typings[s][b][0],
+                      polishes=atoms_and_indices[s][b][0], atom_set=atoms_and_indices[s][b][1],
+                      positive_ids=atoms_and_indices[s][b][2], negative_ids=atoms_and_indices[s][b][3],
+                      idx_to_polish=atoms_and_indices[s][b][4]))
+            for s, b in valid_for_linking
+        ]
 
     def analyses_to_indices(self, analyses: List[Analysis]) -> Tuple[List[List[LongTensor]], List[List[LongTensor]]]:
         positive_ids, negative_ids = list(zip(*[analysis.get_ids() for analysis in analyses]))

@@ -116,11 +116,18 @@ class AtomTokenizer(object):
                  for ids, length in zip(batch_ids, max_lens)]
         return [None if sent is None else [t.split() for t in sent] for sent in sents]
 
+    def convert_beam_ids_to_polish(self, beam_ids: List[List[ints]], max_lens: ints) \
+            -> List[List[Optional[List[strs]]]]:
+        return [self.convert_batch_ids_to_polish(sent, [length] * len(sent))
+                for sent, length in zip(beam_ids, max_lens)]
+
     @staticmethod
     def drop_padded_atoms(atoms: Iterable[str], max_len: int, sep: str = '[SEP]') -> Optional[strs]:
         if len(list(filter(lambda x: x == sep, atoms))) < max_len:
             return None
-        return ' '.join(atoms[1:]).split(f' {sep} ')[:max_len]  # , max_atom_len + 3  # +sos+sep+right-inc
+        ret = ' ' + ' '.join(atoms[1:])
+        ret = ret.split(f'{sep}')[:max_len]
+        return [r[1:-1] for r in ret]
 
 
 def make_atom_mapping(samples: List[Sample]) -> Mapping[str, int]:

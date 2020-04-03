@@ -249,20 +249,14 @@ class Parser(Module):
         decoder_input = (self.embedder.embed(sos_tokens) + pos_encodings[:, 0]).unsqueeze(1)
         decoder_input = decoder_input.unsqueeze(1).repeat(1, beam_width, 1, 1)
         sos_tokens = sos_tokens.unsqueeze(1)
-        decoder_output = torch.empty(b, beam_width, s_out, self.dim).to(self.device)
-        output_symbols = torch.empty(b, beam_width, s_out, dtype=torch.long).to(self.device)
+        decoder_output = torch.zeros(b, beam_width, s_out, self.dim).to(self.device)
+        output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long).to(self.device)
         beam_scores = torch.zeros(b, beam_width, device=self.device)
 
         _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer) + 1, device=self.device) * -1e03
         _masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
 
         for t in range(s_out):
-            # timestep begins with
-            # decoder_input:    B K t+1 D
-            # decoder output    B K t D
-            # output symbols    B K t
-            # beam scores       B K
-
             # the next repr of each batch-beam combination
             repr_t = torch.empty(b, beam_width, self.dim, device=self.device)
             for beam in range(beam_width):
@@ -273,7 +267,7 @@ class Parser(Module):
             logprobs_t = self.embedder.invert(repr_t).log_softmax(dim=-1)
 
             sep_counts = count_sep(output_symbols, dim=-1)
-            valid_beams = sep_counts < stop_at
+            valid_beams = sep_counts < stop_at.unsqueeze(1)
 
             if not valid_beams.flatten().any():
                 break
@@ -296,8 +290,8 @@ class Parser(Module):
             best_source_idxes: List[List[Tuple[int, int]]]  # B outer elements, K inner elements indexing (src, tgt)
             best_source_idxes = [[backward_index(idx) for idx in best_source] for best_source in best_sources.tolist()]
 
-            new_decoder_output = torch.empty(b, beam_width, s_out, self.dim, device=self.device)
-            new_decoder_input = torch.empty(b, beam_width, t+1, self.dim, device=self.device)
+            new_decoder_output = torch.zeros(b, beam_width, s_out, self.dim, device=self.device)
+            new_decoder_input = torch.zeros(b, beam_width, t+1, self.dim, device=self.device)
             new_output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long, device=self.device)
 
             for sent in range(b):
@@ -361,7 +355,7 @@ class Parser(Module):
         return supertagging_loss.item(), (link_loss.item() if link_loss != 0 else 0)
 
     @torch.no_grad()
-    def infer(self, sents: strs, beam_size: int, **kwargs) -> List[Analysis]:
+    def infer(self, sents: strs, beam_size: int, **kwargs) -> List[List[Analysis]]:
         self.eval()
 
         sent_lens = [len(sent.split()) + 1 for sent in sents]
@@ -369,28 +363,32 @@ class Parser(Module):
 
         if beam_size == 1:
             type_preds, output_reprs = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
-            type_preds = type_preds.tolist()
+            type_preds = list(map(lambda x: [x], type_preds.tolist()))
         else:
-            type_preds, output_reprs = self.decode_beam(lexical_token_ids.to(self.device),
-                                                        beam_width=beam_size, stop_at=sent_lens)
+            type_preds, output_reprs = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
+                                                        stop_at=sent_lens, **kwargs)
             type_preds = type_preds.tolist()
 
-        import pdb
-        pdb.set_trace()
+        atom_seqs: List[List[Optional[List[strs]]]]
         # filter decoded atoms that count at least as many types as words
-        atom_seqs = self.atom_tokenizer.convert_batch_ids_to_polish(type_preds, sent_lens)
-        partial_analyses = self.type_parser.make_batch_partial_analyses(sents, atom_seqs)
-        positive_ids, negative_ids = self.type_parser.analyses_to_indices(partial_analyses)
+        atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
 
-        atom_lens = [len(pa) for pa in partial_analyses]
-        atom_mask = self.make_atom_mask_from_lens(atom_lens)
+        ids, atom_lens, analyses = list(zip(*self.type_parser.analyze_beam_batch(sents, atom_seqs)))
+        atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
 
-        links_: List[List[Tensor]]
-        links_ = self.link_slow(output_reprs[:, :max(atom_lens)], atom_mask, positive_ids, negative_ids)
+        atom_reprs = torch.zeros(len(ids), max(atom_lens) - 1, self.dim, device=self.device)
+        for i, (s, b) in enumerate(ids):
+            atom_reprs[i] = output_reprs[s, b]
+
+        positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
+
+        links_ = self.link_slow(atom_reprs, atom_mask, positive_ids, negative_ids)
         links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
-        for pa, link in zip(partial_analyses, links):
+        for pa, link in zip(analyses, links):
             pa.fill_matches(link)
-        return partial_analyses
+
+        ianalyses = iter(analyses)
+        return [[ianalyses.__next__() for b in range(beam_size) if (s, b) in ids] for s in range(len(sents))]
 
     @torch.no_grad()
     def eval_batch(self, samples: List[Sample], oracle: bool = False, link: bool = True) \
