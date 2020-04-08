@@ -57,24 +57,6 @@ def tensorize_batch_indexers(sentences: List[List[ints]]) -> List[List[LongTenso
     return [tensorize_sentence_indexers(sentence) for sentence in sentences]
 
 
-def samples_to_batch(samples: List[Sample], atokenizer: 'AtomTokenizer', tokenizer: Tokenizer) \
-        -> Tuple[LongTensor, LongTensor, List[List[LongTensor]], List[List[LongTensor]]]:
-    symbols: List[ints] = tokenizer.encode_samples(samples)
-    embedding_ids: LongTensor = pad_sequence([LongTensor(sample) for sample in symbols],
-                                             padding_value=tokenizer.core.pad_token_id)
-
-    polishes: List[strs] = [sample.polish for sample in samples]
-    _atom_ids: List[ints] = atokenizer.convert_sents_to_ids(polishes)
-    atom_ids: LongTensor = pad_sequence([LongTensor(sample) for sample in _atom_ids])
-
-    _positives: List[List[ints]] = [sample.positive_ids for sample in samples]
-    _negatives: List[List[ints]] = [sample.negative_ids for sample in samples]
-
-    positives = tensorize_batch_indexers(_positives)
-    negatives = tensorize_batch_indexers(_negatives)
-    return embedding_ids, atom_ids, positives, negatives
-
-
 def sents_to_batch(sents: strs, tokenizer: Tokenizer) -> LongTensor:
     tokens = tokenizer.encode_sents(sents)
     return pad_sequence([LongTensor(token_seq) for token_seq in tokens], padding_value=tokenizer.core.pad_token_id)
@@ -128,6 +110,28 @@ class AtomTokenizer(object):
         ret = ' ' + ' '.join(atoms[1:])
         ret = ret.split(f'{sep}')[:max_len]
         return [r[1:-1] for r in ret]
+
+    def samples_to_batch(self, samples: List[Sample], tokenizer: Tokenizer) \
+            -> Tuple[LongTensor, LongTensor, List[List[LongTensor]], List[List[LongTensor]]]:
+        return samples_to_batch(samples, self, tokenizer)
+
+
+def samples_to_batch(samples: List[Sample], atokenizer: 'AtomTokenizer', tokenizer: Tokenizer) \
+        -> Tuple[LongTensor, LongTensor, List[List[LongTensor]], List[List[LongTensor]]]:
+    symbols: List[ints] = tokenizer.encode_samples(samples)
+    embedding_ids: LongTensor = pad_sequence([LongTensor(sample) for sample in symbols],
+                                             padding_value=tokenizer.core.pad_token_id)
+
+    polishes: List[strs] = [sample.polish for sample in samples]
+    _atom_ids: List[ints] = atokenizer.convert_sents_to_ids(polishes)
+    atom_ids: LongTensor = pad_sequence([LongTensor(sample) for sample in _atom_ids])
+
+    _positives: List[List[ints]] = [sample.positive_ids for sample in samples]
+    _negatives: List[List[ints]] = [sample.negative_ids for sample in samples]
+
+    positives = tensorize_batch_indexers(_positives)
+    negatives = tensorize_batch_indexers(_negatives)
+    return embedding_ids, atom_ids, positives, negatives
 
 
 def make_atom_mapping(samples: List[Sample]) -> Mapping[str, int]:

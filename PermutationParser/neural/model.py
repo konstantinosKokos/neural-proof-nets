@@ -42,7 +42,7 @@ class Parser(Module):
         self.unfrozen_blocks = {11}
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.decoder = make_decoder(num_layers=6, num_heads=12, d_model=self.dim, d_k=self.dim // 12,
+        self.decoder = make_decoder(num_layers=3, num_heads=12, d_model=self.dim, d_k=self.dim // 12,
                                     d_v=self.dim // 12,
                                     d_intermediate=2 * self.dim, dropout=0.1).to(device)
         self.embedder = InvertibleEmbedder(self.num_embeddings, dim, device)
@@ -87,7 +87,8 @@ class Parser(Module):
         return encoder_output
 
     def encode_atoms(self, atom_reprs: Tensor, atom_mask: LongTensor) -> Tensor:
-        if atom_reprs.shape[1] == 0:
+        s_out = atom_reprs.shape[1]
+        if s_out == 0:
             return atom_reprs
         return self.atom_encoder((atom_reprs, atom_mask))[0]
 
@@ -323,7 +324,7 @@ class Parser(Module):
                     linking_weight: float = 0.5) -> Tuple[float, float]:
         self.train()
 
-        words, types, pos_idxes, neg_idxes = samples_to_batch(samples, self.atom_tokenizer, self.tokenizer)
+        words, types, pos_idxes, neg_idxes = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
         atom_mask = self.make_atom_mask(types)
 
         output_reprs = self.decode_train(words, types)
@@ -373,12 +374,15 @@ class Parser(Module):
         # filter decoded atoms that count at least as many types as words
         atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
 
-        ids, atom_lens, analyses = list(zip(*self.type_parser.analyze_beam_batch(sents, atom_seqs)))
+        tmp = self.type_parser.analyze_beam_batch(sents, atom_seqs)
+        if not len(tmp):
+            return [[] for s in range(len(sents))]
+        ids, atom_lens, analyses = list(zip(*tmp))
         atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
 
         atom_reprs = torch.zeros(len(ids), max(atom_lens) - 1, self.dim, device=self.device)
         for i, (s, b) in enumerate(ids):
-            atom_reprs[i] = output_reprs[s, b]
+            atom_reprs[i] = output_reprs[s, b, :max(atom_lens) - 1]
 
         positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
 
@@ -395,7 +399,7 @@ class Parser(Module):
             -> Tuple[Tuple[int, int], Tuple[Tuple[int, int], Tuple[int, int]]]:
         self.eval()
 
-        words, types, pos_idxes, neg_idxes = samples_to_batch(samples, self.atom_tokenizer, self.tokenizer)
+        words, types, pos_idxes, neg_idxes = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
         atom_mask = self.make_atom_mask(types)
 
         if oracle:
