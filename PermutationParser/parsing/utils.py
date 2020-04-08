@@ -39,6 +39,9 @@ class Analysis:
     def __len__(self):
         return len(self.polishes) if self.polishes is not None else 0
 
+    def __repr__(self):
+        return ', '.join([f'{w}: {t}' for w, t in zip(self.words, self.types)]) + f' ⊢ {self.conclusion}'
+
     def get_ids(self) -> Tuple[List[List[int]], List[List[int]]]:
         if self.positive_ids is None:
             return [], []
@@ -75,15 +78,16 @@ class TypeParser(object):
         atoms_and_indices = [[self.get_atomset_and_indices(sent) for sent in beam] for beam in polarized]
         valid_for_linking = [(s, b) for s in range(len(atoms_and_indices)) for b in range(len(atoms_and_indices[s]))
                              if atoms_and_indices[s][b] is not None]
-        return [
+        proper_analyses = [
             ((s, b),
              len(atoms_and_indices[s][b][0]),
-             Analysis(words=sents[s], types=typings[s][b][1:], conclusion=typings[s][b][0],
+             Analysis(words=sents[s].split(), types=polarized[s][b][1:], conclusion=polarized[s][b][0],
                       polishes=atoms_and_indices[s][b][0], atom_set=atoms_and_indices[s][b][1],
                       positive_ids=atoms_and_indices[s][b][2], negative_ids=atoms_and_indices[s][b][3],
                       idx_to_polish=atoms_and_indices[s][b][4]))
             for s, b in valid_for_linking
         ]
+        return proper_analyses
 
     def analyses_to_indices(self, analyses: List[Analysis]) -> Tuple[List[List[LongTensor]], List[List[LongTensor]]]:
         positive_ids, negative_ids = list(zip(*[analysis.get_ids() for analysis in analyses]))
