@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from functools import reduce
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Dict, Tuple
 
 from PermutationParser.data.constants import ModDeps
-from PermutationParser.data.preprocessing import strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints
+from PermutationParser.data.preprocessing import (strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints,
+                                                  Sample, make_atom_set, get_conclusion)
 from PermutationParser.neural.utils import AtomTokenizer, tensorize_batch_indexers, LongTensor
 from PermutationParser.parsing.milltypes import (BoxType, DiamondType, WordType, polish_to_type,
                                                  get_polarities_and_indices, polarize_and_index_many,
@@ -13,34 +14,44 @@ WordTypes = List[WordType]
 OWordType = Optional[WordType]
 OWordTypes = List[OWordType]
 
+_atom_set = make_atom_set()
+
 
 @dataclass(init=False)
 class Analysis:
     words: strs
     types: Optional[WordTypes] = None
     conclusion: Optional[WordType] = None
-    polishes: Optional[strs] = None
+    polish: Optional[strs] = None
     atom_set: Optional[Atoms] = None
     positive_ids: Optional[List[ints]] = None
     negative_ids: Optional[List[ints]] = None
     idx_to_polish: Optional[Dict[int, int]] = None
     proof: Optional[Dict[int, int]] = None
 
-    def __init__(self, words, types, conclusion, polishes, atom_set, positive_ids, negative_ids, idx_to_polish):
+    def __init__(self, words: strs, types: Optional[WordTypes], conclusion: Optional[WordType], polish: Optional[strs],
+                 atom_set: Optional[Atoms], positive_ids: Optional[List[ints]], negative_ids: Optional[List[ints]],
+                 idx_to_polish: Optional[Dict[int, int]], proof: Optional[Dict[int, int]] = None):
         self.words = words
         self.types = types
         self.conclusion = conclusion
-        self.polishes = polishes
+        self.polish = polish
         self.atom_set = atom_set
         self.positive_ids = positive_ids
         self.negative_ids = negative_ids
         self.idx_to_polish = idx_to_polish
+        self.proof = proof
 
     def __len__(self):
-        return len(self.polishes) if self.polishes is not None else 0
+        return len(self.polish) if self.polish is not None else 0
 
     def __repr__(self):
         return ', '.join([f'{w}: {t}' for w, t in zip(self.words, self.types)]) + f' ⊢ {self.conclusion}'
+
+    def __eq__(self, other: 'Analysis') -> Optional[bool]:
+        if any(map(lambda x: x is None, [self.words, self.types, self.proof, other.words, other.types, other.proof])):
+            return None
+        return self.words == other.words and self.types == other.types and self.proof == other.proof
 
     def get_ids(self) -> Tuple[List[List[int]], List[List[int]]]:
         if self.positive_ids is None:
@@ -135,3 +146,32 @@ class TypeParser(object):
                                 negative_sep))
 
         return polished, local_atom_set, positive_ids, negative_ids, polish_from_index
+
+
+def sample_to_analysis(sample: Sample) -> Analysis:
+    words = sample.words
+    types = sample.types
+    polished = sample.polish
+
+    atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types)))))
+    negative, positive = list(map(lambda x: reduce(add, x), atoms))
+    conclusion_pair = get_conclusion(positive + negative, sample.proof)
+    negative += [conclusion_pair]
+    conclusion_type = polarize_and_index(conclusion_pair[0], False, conclusion_pair[1])[1]
+
+    local_atom_set = list(set(map(lambda x: x[0], positive + negative)))
+    positive_sep = sep(positive, local_atom_set)
+    negative_sep = sep(negative, local_atom_set)
+
+    polished = polish_fn([conclusion_type] + types)
+    positional_ids = index_from_polish(polished, offset=-1)
+    polish_from_index = {v: k for k, v in positional_ids.items()}
+
+    positive_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
+                            positive_sep))
+    negative_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
+                            negative_sep))
+
+    return Analysis(words=words, types=types, conclusion=conclusion_type,
+                    polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
+                    idx_to_polish=polish_from_index, proof={k: v for k, v in sample.proof})

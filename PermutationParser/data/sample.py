@@ -1,6 +1,7 @@
 import pickle
 from dataclasses import dataclass
 from typing import List, Set, Tuple
+from PermutationParser.parsing.milltypes import WordTypes
 
 ProofNet = Set[Tuple[int, int]]
 Matrix = List[List[bool]]
@@ -16,7 +17,8 @@ class Sample:
     positive_ids: List[ints]
     negative_ids: List[ints]
     polish: strs
-    types: strs
+    types: WordTypes
+    proof: ProofNet
 
     def __hash__(self) -> int:
         words = tuple(self.words).__hash__()

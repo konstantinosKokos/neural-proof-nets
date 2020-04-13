@@ -17,7 +17,10 @@ MWU = AtomicType('_MWU')
 
 
 def make_atom_set() -> Atoms:
-    return list(PtDict.values()) + list(CatDict.values()) + [MWU]
+    return sorted(list(PtDict.values()) + list(CatDict.values()) + [MWU], key=lambda x: str(x))
+
+
+_atom_set = make_atom_set()
 
 
 def polish_fn(types: List[WordType], sos_symbol: str = '[SOS]', sep_symbol: str = '[SEP]') -> strs:
@@ -34,23 +37,24 @@ def sep(_atoms: List[Tuple[AtomicType, int]], atom_set: Atoms) -> List[List[Tupl
     return [list(filter(lambda p: p[0] == a, _atoms)) for a in atom_set]
 
 
-def preprocess(words: strs, types: List[WordType], proof: ProofNet, atom_set: Optional[Atoms] = None) -> Sample:
-    def get_conclusion(_atoms: List[Tuple[AtomicType, int]], _proof: ProofNet) -> Tuple[AtomicType, int]:
-        antecedents = set(map(lambda x: x[1], _atoms))
-        conclusion_id = list(set(map(lambda x: x[1],
-                                     _proof)).
-                             union(set(map(lambda x: x[0],
-                                           _proof))).
-                             difference(antecedents))[0]
-        conclusion_pair = list(filter(lambda pair: pair[1] == conclusion_id, _proof))[0][0]
-        conclusion_atom = list(filter(lambda a: a[1] == conclusion_pair, _atoms))[0][0]
-        return conclusion_atom, conclusion_id
+def get_conclusion(_atoms: List[Tuple[AtomicType, int]], _proof: ProofNet) -> Tuple[AtomicType, int]:
+    antecedents = set(map(lambda x: x[1], _atoms))
+    conclusion_id = list(set(map(lambda x: x[1],
+                                 _proof)).
+                         union(set(map(lambda x: x[0],
+                                       _proof))).
+                         difference(antecedents))[0]
+    conclusion_pair = list(filter(lambda pair: pair[1] == conclusion_id, _proof))[0][0]
+    conclusion_atom = list(filter(lambda a: a[1] == conclusion_pair, _atoms))[0][0]
+    return conclusion_atom, conclusion_id
 
+
+def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optional[Atoms] = None) -> Sample:
     if len(types) == 1:
         return None
 
     if atom_set is None:
-        atom_set = make_atom_set()
+        atom_set = _atom_set
 
     words, types = preprocess_pairs(words, types)
 
@@ -78,7 +82,7 @@ def preprocess(words: strs, types: List[WordType], proof: ProofNet, atom_set: Op
 
     return Sample(words=words, matrices=matrices, positive_ids=positive_ids, negative_ids=negative_ids,
                   polish=remove_polarities(polished),
-                  types=list(map(str, types)))
+                  types=types, proof=proof)
 
 
 def convert_matches_to_matrix(matches: Tuple[ints, ints], proof: ProofNet) -> Matrix:
@@ -111,7 +115,7 @@ def main() -> List[Sample]:
         words, types, proofs = pickle.load(f)
 
     samples = list(filter(lambda x: x is not None,
-                          map(lambda w, t, p: preprocess(w, t, p), words, types, proofs)))
+                          map(lambda w, t, p: preprocess(w, t, p, _atom_set), words, types, proofs)))
     with open('./processed.p', 'wb') as f:
         pickle.dump(samples, f)
         print('Saved pre-processed samples.')

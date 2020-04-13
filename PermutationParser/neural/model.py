@@ -56,8 +56,9 @@ class Parser(Module):
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
 
-    def sinkhorn(self, x: Tensor):
-        return sinkhorn_fn(x, tau=1, iters=5, eps=1e-18)
+    @staticmethod
+    def sinkhorn(x: Tensor, tau: int = 1, iters: int = 5, eps: float = 1e-18) -> Tensor:
+        return sinkhorn_fn(x, tau=tau, iters=iters, eps=eps)
 
     def freeze_encoder(self) -> None:
         for param in self.word_encoder.parameters():
