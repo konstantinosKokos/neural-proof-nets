@@ -2,7 +2,7 @@ from itertools import chain
 from typing import *
 
 import torch
-from torch.nn import Module, functional, Parameter
+from torch.nn import Module, functional, Parameter, Linear
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -10,23 +10,9 @@ from transformers import BertModel
 
 from PermutationParser.neural.sinkhorn import sinkhorn_fn
 from PermutationParser.neural.utils import *
+from PermutationParser.neural.embedding import ComplexEmbedding
 from PermutationParser.parsing.utils import TypeParser, Analysis
 from PermutationParser.neural.transformer import make_decoder, FFN, make_encoder
-
-
-class InvertibleEmbedder(Module):
-    def __init__(self, num_embeddings: int, dim: int, device: str):
-        super(InvertibleEmbedder, self).__init__()
-        weights = torch.rand(num_embeddings, dim, device=device) * 0.02
-        self.register_parameter('weights', Parameter(weights, requires_grad=True))
-        self.sqrt = torch.sqrt(torch.tensor([dim], device=device, dtype=torch.float, requires_grad=False))
-
-    def embed(self, x: LongTensor, padding_idx: int = 0, scale_grad_by_freq: bool = False):
-        emb = functional.embedding(x, self.weights, padding_idx=padding_idx, scale_grad_by_freq=scale_grad_by_freq)
-        return emb * self.sqrt
-
-    def invert(self, x: Tensor) -> Tensor:
-        return functional.linear(x, self.weights)
 
 
 class Parser(Module):
@@ -37,21 +23,22 @@ class Parser(Module):
         self.device = device
         self.atom_tokenizer = atokenizer
         self.type_parser = TypeParser(atokenizer)
+        self.tokenizer = tokenizer
+        self.dropout = Dropout(0.1)
+
         self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
         self.freeze_encoder()
         self.unfrozen_blocks = {11}
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.decoder = make_decoder(num_layers=3, num_heads=12, d_model=self.dim, d_k=self.dim // 12,
-                                    d_v=self.dim // 12,
-                                    d_intermediate=2 * self.dim, dropout=0.1).to(device)
-        self.embedder = InvertibleEmbedder(self.num_embeddings, dim, device)
-        self.pos_encoder = PositionalEncoder(0.1)
+        self.atom_decoder = make_decoder(num_layers=3, num_heads=12, d_model=self.dim, d_k=self.dim // 12,
+                                         d_v=self.dim // 12,
+                                         d_intermediate=2 * self.dim, dropout=0.1).to(device)
+        self.atom_embedder = ComplexEmbedding(self.num_embeddings, int(dim/2)).to(device)
+        self.atom_classifier = Linear(in_features=dim, out_features=self.num_embeddings).to(device)
         self.atom_encoder = make_encoder(num_layers=1, num_heads=12, d_model=self.dim, d_k=self.dim // 12,
                                          d_v=self.dim // 12, d_intermediate=2 * self.dim, dropout=0.1).to(device)
         self.negative_transformation = FFN(d_model=self.dim, d_ff=2 * self.dim).to(device)
-        self.tokenizer = tokenizer
-        self.dropout = Dropout(0.1)
 
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
@@ -70,17 +57,20 @@ class Parser(Module):
             param.requires_grad = True
 
     def train(self, mode: bool = True) -> None:
-        self.embedder.train(mode)
-        self.pos_encoder.train(mode)
-        self.decoder.train(mode)
+        self.atom_embedder.train(mode)
+        self.atom_decoder.train(mode)
         self.negative_transformation.train(mode)
         self.dropout.train(mode)
         self.atom_encoder.train(mode)
+        self.atom_classifier.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
 
     def eval(self) -> None:
         self.train(False)
+
+    def predict_atoms(self, reprs: Tensor) -> Tensor:
+        return self.atom_classifier(reprs)
 
     def encode_words(self, lexical_token_ids: LongTensor, encoder_mask: LongTensor) -> Tensor:
         encoder_output, _ = self.word_encoder(lexical_token_ids.to(self.device),
@@ -101,13 +91,11 @@ class Parser(Module):
         encoder_output = self.dropout(self.encode_words(lexical_token_ids, encoder_mask))
 
         decoder_mask = self.make_decoder_mask(b=b, n=s_out)
-        atom_embeddings = self.embedder.embed(symbol_ids.to(self.device))
-        pos_encodings = self.pos_encoder(b, s_out, self.dim, 1000, self.device)
-        atom_embeddings = self.dropout(atom_embeddings) + pos_encodings
+        atom_embeddings = self.atom_embedder(symbol_ids.to(self.device))
 
         extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
 
-        return self.decoder((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
+        return self.atom_decoder((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
 
     def link(self, atom_reprs: Tensor, atom_mask: LongTensor, pos_idxes: List[List[LongTensor]],
              neg_idxes: List[List[LongTensor]], exclude_singular: bool = True) \
@@ -198,23 +186,22 @@ class Parser(Module):
         encoder_mask = self.make_word_mask(lexical_token_ids)
         encoder_output = self.encode_words(lexical_token_ids, encoder_mask)
 
-        pos_encodings = self.pos_encoder(b, s_out, self.dim, 1000, self.device)
         extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
         decoder_mask = self.make_decoder_mask(b, s_out)
 
         output_symbols = (torch.ones(b) * self.atom_tokenizer.sos_token_id).long().to(self.device)
-        decoder_input = (self.embedder.embed(output_symbols) + pos_encodings[:, 0]).unsqueeze(1)
+        decoder_input = (self.atom_embedder.embed(output_symbols, 0)).unsqueeze(1)
         output_symbols = output_symbols.unsqueeze(1)
         decoder_output = torch.empty(b, s_out, self.dim).to(self.device)
 
         for t in range(s_out):
             _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                     decoder_input, decoder_mask[:, :t + 1, :t + 1])
-            repr_t = self.decoder(_decoder_tuple_input)[2][:, -1]
-            prob_t = self.embedder.invert(repr_t)
+            repr_t = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
+            prob_t = self.atom_classifier(repr_t)
             class_t = prob_t.argmax(dim=-1)
             output_symbols = torch.cat([output_symbols, class_t.unsqueeze(1)], dim=1)
-            next_embedding = self.embedder.embed(class_t).unsqueeze(1) + pos_encodings[:, t + 1:t + 2]
+            next_embedding = self.atom_embedder.embed(class_t, t+1).unsqueeze(1)
             decoder_input = torch.cat([decoder_input, next_embedding], dim=1)
             decoder_output[:, t] = repr_t
         return output_symbols, decoder_output
@@ -243,12 +230,11 @@ class Parser(Module):
         encoder_mask = self.make_word_mask(lexical_token_ids)
         encoder_output = self.encode_words(lexical_token_ids, encoder_mask)
 
-        pos_encodings = self.pos_encoder(b, s_out, self.dim, 1000, self.device)
         extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
         decoder_mask = self.make_decoder_mask(b, s_out)
 
         sos_tokens = (torch.ones(b) * self.atom_tokenizer.sos_token_id).long().to(self.device)
-        decoder_input = (self.embedder.embed(sos_tokens) + pos_encodings[:, 0]).unsqueeze(1)
+        decoder_input = (self.atom_embedder(sos_tokens)).unsqueeze(1)
         decoder_input = decoder_input.unsqueeze(1).repeat(1, beam_width, 1, 1)
         sos_tokens = sos_tokens.unsqueeze(1)
         decoder_output = torch.zeros(b, beam_width, s_out, self.dim).to(self.device)
@@ -264,9 +250,9 @@ class Parser(Module):
             for beam in range(beam_width):
                 _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                         decoder_input[:, beam], decoder_mask[:, :t + 1, :t + 1])
-                repr_t[:, beam] = self.decoder(_decoder_tuple_input)[2][:, -1]
+                repr_t[:, beam] = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
 
-            logprobs_t = self.embedder.invert(repr_t).log_softmax(dim=-1)
+            logprobs_t = self.emb(repr_t).log_softmax(dim=-1)
 
             sep_counts = count_sep(output_symbols, dim=-1)
             valid_beams = sep_counts < stop_at.unsqueeze(1)
@@ -313,10 +299,10 @@ class Parser(Module):
 
             class_t = output_symbols[:, :, t]
 
-            next_embedding = self.embedder.embed(class_t)
+            next_embedding = self.atom_embedder.embed(class_t, t+1)
 
             if t != s_out - 1:
-                next_embedding = (next_embedding + pos_encodings[:, t+1:t+2].repeat(1, beam_width, 1)).unsqueeze(2)
+                next_embedding = (next_embedding.repeat(1, beam_width, 1)).unsqueeze(2)
                 decoder_input = torch.cat([decoder_input, next_embedding], dim=2)
         output_symbols = torch.cat([sos_tokens.unsqueeze(1).repeat(1, beam_width, 1), output_symbols], dim=2)
         return output_symbols, decoder_output.view(b, beam_width, -1, self.dim)
@@ -331,7 +317,7 @@ class Parser(Module):
         output_reprs = self.decode_train(words, types)
 
         # supertagging
-        type_predictions = self.embedder.invert(output_reprs[:, :-1])  # no predict on last token
+        type_predictions = self.predict_atoms(output_reprs[:, :-1])  # no predict on last token
         type_predictions = type_predictions.permute(0, 2, 1)
         types = types[:, 1:].to(self.device)  # no loss on first token
         supertagging_loss = loss_fn(type_predictions, types)
@@ -405,7 +391,7 @@ class Parser(Module):
 
         if oracle:
             output_reprs = self.decode_train(words, types)
-            type_predictions = self.embedder.invert(output_reprs[:, :-1]).argmax(dim=-1)
+            type_predictions = self.predict_atoms(output_reprs[:, :-1]).argmax(dim=-1)
         else:
             max_length = types.shape[1]
             type_predictions, output_reprs = self.decode_greedy(words, max_decode_length=max_length)

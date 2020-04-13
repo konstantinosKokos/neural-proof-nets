@@ -13,7 +13,7 @@ num_epochs = 1000
 warmup_epochs = 5
 restart_epochs = 100
 max_lr = 1e-04
-linking_weight = 2
+linking_weight = 1
 
 
 def logprint(x: str, ostream: Any) -> None:
@@ -78,8 +78,10 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
                                                   decay_over=num_epochs * nbatches)
 
     param_groups, grad_scales = list(zip(*[({'params': parser.word_encoder.parameters()}, 0.1),
-                                           ({'params': parser.decoder.parameters()}, 1),
-                                           ({'params': parser.embedder.parameters()}, 1),
+                                           ({'params': parser.atom_embedder.parameters()}, 1),
+                                           ({'params': parser.atom_decoder.parameters()}, 1),
+                                           ({'params': parser.atom_encoder.parameters()}, 1),
+                                           ({'params': parser.atom_classifier.parameters()}, 1),
                                            ({'params': parser.negative_transformation.parameters()}, 1)]))
 
     _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
@@ -104,7 +106,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
         save = True if e % 20 == 0 and e != 0 else True if e == num_epochs - 1 else False
         epoch_lr = opt.lr
 
-        with open(f'{save_to_dir}/log.txt', 'a') as stream:
+        with open(f'{save_to_dir}/{version}/log.txt', 'a') as stream:
             logprint('=' * 64, stream)
             logprint(f'Epoch {e}', stream)
             logprint(' ' * 50 + f'LR: {epoch_lr}', stream)
