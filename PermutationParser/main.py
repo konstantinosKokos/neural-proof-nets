@@ -45,20 +45,19 @@ def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 6
     print(f'Version id:\t{version}')
 
     # load data and model
-    samples = load_stored() if datapath is None else load_stored(datapath)
-    train_size = round(0.9 * len(samples))
-    val_size = round(0.95 * len(samples))
-    trainset = samples[:train_size]
-    valset = sorted(samples[train_size:val_size], key=lambda sample: len(sample.polish))
-    testset = sorted(samples[val_size:], key=lambda sample: len(sample.polish))
+    trainset, devset, testset = load_stored() if datapath is None else load_stored(datapath)
+
+    devset = sorted(devset, key=lambda sample: len(sample.polish))
+    testset = sorted(testset, key=lambda sample: len(sample.polish))
+
     train_dl = make_dataloader([sample for sample in trainset if len(sample.polish) <= max_len], train_batch)
-    val_dl = make_dataloader([sample for sample in valset if len(sample.polish) <= max_len], val_batch, shuffle=False)
+    dev_dl = make_dataloader([sample for sample in devset if len(sample.polish) <= max_len], val_batch, shuffle=False)
     test_dl = make_dataloader(testset, val_batch, shuffle=False)
     nbatches = get_nbatches(max_len, trainset, train_batch)
     print('Read data.')
-    parser = Parser(AtomTokenizer(samples), Tokenizer(), 768, device)
+    parser = Parser(AtomTokenizer(trainset + devset + testset), Tokenizer(), 768, device)
     print('Initialized model.')
-    return train_dl, val_dl, test_dl, nbatches, parser, version
+    return train_dl, dev_dl, test_dl, nbatches, parser, version
 
 
 def init_pere(datapath: str, save_to_dir: str) -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:

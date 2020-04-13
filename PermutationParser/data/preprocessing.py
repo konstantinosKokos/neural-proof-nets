@@ -110,13 +110,24 @@ def remove_polarities(indexed: strs) -> strs:
     return list(map(remove_polarity, indexed))
 
 
-def main() -> List[Sample]:
+def main() -> Tuple[List[Sample], List[Sample], List[Sample]]:
     with open('./maximal.p', 'rb') as f:
-        words, types, proofs = pickle.load(f)
+        train, dev, test = pickle.load(f)
+        trainwords, traintypes, trainproofs = train
+        devwords, devtypes, devproofs = dev
+        testwords, testtypes, testproofs = test
 
-    samples = list(filter(lambda x: x is not None,
-                          map(lambda w, t, p: preprocess(w, t, p, _atom_set), words, types, proofs)))
+    trainsamples = list(filter(lambda x: x is not None,
+                               map(lambda w, t, p: preprocess(w, t, p, _atom_set),
+                                   trainwords, traintypes, trainproofs)))
+    devsamples = list(filter(lambda x: x is not None,
+                             map(lambda w, t, p: preprocess(w, t, p, _atom_set),
+                                 devwords, devtypes, devproofs)))
+    testsamples = list(filter(lambda x: x is not None,
+                              map(lambda w, t, p: preprocess(w, t, p, _atom_set),
+                                  testwords, testtypes, testproofs)))
+
     with open('./processed.p', 'wb') as f:
-        pickle.dump(samples, f)
+        pickle.dump((trainsamples, devsamples, testsamples), f)
         print('Saved pre-processed samples.')
-        return samples
+        return trainsamples, devsamples, testsamples

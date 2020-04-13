@@ -29,7 +29,7 @@ class Sample:
         return (words, matrices, positive_ids, negative_ids, polished).__hash__()
 
 
-def load_stored(file: str = './processed.p'):
+def load_stored(file: str = './processed.p') -> Tuple[List[Sample], List[Sample], List[Sample]]:
     with open(file, 'rb') as f:
         print('Opening pre-processed samples.')
         return pickle.load(f)
