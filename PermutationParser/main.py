@@ -55,7 +55,7 @@ def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 6
     test_dl = make_dataloader(testset, val_batch, shuffle=False)
     nbatches = get_nbatches(max_len, trainset, train_batch)
     print('Read data.')
-    parser = Parser(AtomTokenizer(trainset + devset + testset), Tokenizer(), 768, device)
+    parser = Parser(AtomTokenizer(trainset + devset + testset), Tokenizer(), 768, 128, device)
     print('Initialized model.')
     return train_dl, dev_dl, test_dl, nbatches, parser, version
 
