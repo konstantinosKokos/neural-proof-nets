@@ -93,7 +93,7 @@ class TypeParser(object):
             ((s, b),
              len(atoms_and_indices[s][b][0]),
              Analysis(words=sents[s].split(), types=polarized[s][b][1:], conclusion=polarized[s][b][0],
-                      polishes=atoms_and_indices[s][b][0], atom_set=atoms_and_indices[s][b][1],
+                      polish=atoms_and_indices[s][b][0], atom_set=atoms_and_indices[s][b][1],
                       positive_ids=atoms_and_indices[s][b][2], negative_ids=atoms_and_indices[s][b][3],
                       idx_to_polish=atoms_and_indices[s][b][4]))
             for s, b in valid_for_linking
