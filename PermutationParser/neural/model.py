@@ -38,7 +38,6 @@ class Parser(Module):
                                          d_v_enc=self.enc_dim//12, d_v_dec=self.dec_dim//8, d_interm=self.dec_dim * 2,
                                          dropout_rate=0.1).to(device)
         self.atom_embedder = ComplexEmbedding(self.num_embeddings, dec_dim//2).to(device)
-        self.atom_classifier = Linear(in_features=dec_dim, out_features=self.num_embeddings).to(device)
         self.atom_encoder = make_encoder(num_layers=1, num_heads=8, d_model=self.dec_dim, d_k=self.dec_dim,
                                          d_v=self.dec_dim // 8, d_intermediate=2 * self.dec_dim, dropout=0.1).to(device)
         self.negative_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
@@ -65,15 +64,14 @@ class Parser(Module):
         self.negative_transformation.train(mode)
         self.dropout.train(mode)
         self.atom_encoder.train(mode)
-        self.atom_classifier.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
 
     def eval(self) -> None:
         self.train(False)
 
-    def predict_atoms(self, reprs: Tensor) -> Tensor:
-        return self.atom_classifier(reprs)
+    def predict_atoms(self, reprs: Tensor, t: int) -> Tensor:
+        return self.atom_embedder.invert(reprs, t)
 
     def encode_words(self, lexical_token_ids: LongTensor, encoder_mask: LongTensor) -> Tensor:
         encoder_output, _ = self.word_encoder(lexical_token_ids.to(self.device),
@@ -201,7 +199,7 @@ class Parser(Module):
             _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                     decoder_input, decoder_mask[:, :t + 1, :t + 1])
             repr_t = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
-            prob_t = self.atom_classifier(repr_t)
+            prob_t = self.predict_atoms(repr_t, t+1)
             class_t = prob_t.argmax(dim=-1)
             output_symbols = torch.cat([output_symbols, class_t.unsqueeze(1)], dim=1)
             next_embedding = self.atom_embedder.embed(class_t, t+1).unsqueeze(1)
@@ -255,7 +253,7 @@ class Parser(Module):
                                         decoder_input[:, beam], decoder_mask[:, :t + 1, :t + 1])
                 repr_t[:, beam] = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
 
-            logprobs_t = self.emb(repr_t).log_softmax(dim=-1)
+            logprobs_t = self.predict_atoms(repr_t, t+1).log_softmax(dim=-1)
 
             sep_counts = count_sep(output_symbols, dim=-1)
             valid_beams = sep_counts < stop_at.unsqueeze(1)
@@ -320,7 +318,7 @@ class Parser(Module):
         output_reprs = self.decode_train(words, types)
 
         # supertagging
-        type_predictions = self.predict_atoms(output_reprs[:, :-1])  # no predict on last token
+        type_predictions = self.predict_atoms(output_reprs[:, :-1], 1)  # no predict on last token
         type_predictions = type_predictions.permute(0, 2, 1)
         types = types[:, 1:].to(self.device)  # no loss on first token
         supertagging_loss = loss_fn(type_predictions, types)
@@ -355,10 +353,12 @@ class Parser(Module):
         if beam_size == 1:
             type_preds, output_reprs = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
             type_preds = list(map(lambda x: [x], type_preds.tolist()))
+            output_reprs = output_reprs.unsqueeze(1)
         else:
             type_preds, output_reprs = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
                                                         stop_at=sent_lens, **kwargs)
             type_preds = type_preds.tolist()
+
 
         atom_seqs: List[List[Optional[List[strs]]]]
         # filter decoded atoms that count at least as many types as words
@@ -366,7 +366,7 @@ class Parser(Module):
 
         tmp = self.type_parser.analyze_beam_batch(sents, atom_seqs)
         if not len(tmp):
-            return [[] for s in range(len(sents))]
+            return [[] for _ in range(len(sents))]
         ids, atom_lens, analyses = list(zip(*tmp))
         atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
 
@@ -394,7 +394,7 @@ class Parser(Module):
 
         if oracle:
             output_reprs = self.decode_train(words, types)
-            type_predictions = self.predict_atoms(output_reprs[:, :-1]).argmax(dim=-1)
+            type_predictions = self.predict_atoms(output_reprs[:, :-1], 1).argmax(dim=-1)
         else:
             max_length = types.shape[1]
             type_predictions, output_reprs = self.decode_greedy(words, max_decode_length=max_length)
