@@ -3,7 +3,7 @@ from typing import *
 import pickle
 from dataclasses import dataclass
 
-PNet = Dict[int, int]
+IntMapping = Dict[int, int]
 
 
 with open('./example_analysis.pickle', 'rb') as f:
@@ -40,11 +40,11 @@ class Graph(object):
         self.nodes.update(set.union(*nodes))
         self.edges.update(set.union(*edges))
 
-    def add_inter_graphs(self, proofnet: PNet):
+    def add_inter_graphs(self, proofnet: IntMapping):
         self.edges.update({(k, v) for k, v in proofnet.items()})
 
 
-def make_graph(premises: WordTypes, conclusion: WordType, pnet: PNet) -> Graph:
+def make_graph(premises: WordTypes, conclusion: WordType, pnet: IntMapping) -> Graph:
     graph = Graph()
     graph.add_atomic_nodes(premises + [conclusion])
     graph.add_intra_graphs(premises + [conclusion])

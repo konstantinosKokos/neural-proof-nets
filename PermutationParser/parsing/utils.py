@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import reduce
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 
 from PermutationParser.data.constants import ModDeps
 from PermutationParser.data.preprocessing import (strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints,
@@ -9,7 +9,7 @@ from PermutationParser.neural.utils import AtomTokenizer, tensorize_batch_indexe
 from PermutationParser.parsing.milltypes import (BoxType, DiamondType, WordType, polish_to_type,
                                                  get_polarities_and_indices, polarize_and_index_many,
                                                  polarize_and_index, invariance_check)
-from PermutationParser.parsing.lambdas import Graph, make_graph
+from PermutationParser.parsing.lambdas import Graph, make_graph, IntMapping
 
 WordTypes = List[WordType]
 OWordType = Optional[WordType]
@@ -27,13 +27,13 @@ class Analysis:
     atom_set: Optional[Atoms] = None
     positive_ids: Optional[List[ints]] = None
     negative_ids: Optional[List[ints]] = None
-    idx_to_polish: Optional[Dict[int, int]] = None
-    axiom_links: Optional[Dict[int, int]] = None
+    idx_to_polish: Optional[IntMapping] = None
+    axiom_links: Optional[IntMapping] = None
     proof_structure: Optional[Graph] = None
 
     def __init__(self, words: strs, types: Optional[WordTypes], conclusion: Optional[WordType], polish: Optional[strs],
                  atom_set: Optional[Atoms], positive_ids: Optional[List[ints]], negative_ids: Optional[List[ints]],
-                 idx_to_polish: Optional[Dict[int, int]], axiom_links: Optional[Dict[int, int]] = None,
+                 idx_to_polish: Optional[IntMapping], axiom_links: Optional[IntMapping] = None,
                  proof_structure: Optional[Graph] = None):
         self.words = words
         self.types = types
@@ -67,7 +67,7 @@ class Analysis:
         pos: ints
         neg: ints
         match: ints
-        pnet: Dict[int, int] = dict()
+        pnet: IntMapping = dict()
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
@@ -131,7 +131,7 @@ class TypeParser(object):
 
     @staticmethod
     def get_atomset_and_indices(sent: Optional[WordTypes]) \
-            -> Optional[Tuple[strs, Atoms, List[ints], List[ints], Dict[int, int]]]:
+            -> Optional[Tuple[strs, Atoms, List[ints], List[ints], IntMapping]]:
         if sent is None:
             return None
         atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, sent[1:])))))
