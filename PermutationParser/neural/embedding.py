@@ -42,6 +42,8 @@ class ComplexEmbedding(Module):
 
         if rank == 3:
             # words := B x S x D
+
+            # S
             positions = torch.arange(start=start_from + 1, end=token_reprs.shape[1] + 1 + start_from,
                                      device=token_reprs.device)
 
@@ -52,17 +54,18 @@ class ComplexEmbedding(Module):
             # A x D x S
             phase_map = torch.cat([torch.cos(phase_map), torch.sin(phase_map)], dim=1)
 
-            # A x D x 1
+            # A x D
             amplitude_map = self.amplitudes.weight
-            amplitude_map = torch.cat([amplitude_map, amplitude_map], dim=-1).unsqueeze(-1)
+            amplitude_map = torch.cat([amplitude_map, amplitude_map], dim=-1)
 
             # A x D x S
-            inversion_map = amplitude_map * phase_map
+            inversion_map = amplitude_map.unsqueeze(-1) * phase_map
+
             # S x D x A
-            inversion_map = inversion_map.permute(-3, -2, -1)
+            inversion_map = inversion_map.permute(-1, -2, -3)
             # S x B x D
             token_reprs = token_reprs.transpose(-3, -2)
-            return self.dropout(bmm(token_reprs, inversion_map))
+            return self.dropout(bmm(token_reprs, inversion_map)).transpose(-2, -3)
 
         elif rank == 2:
             # tokens := B x D
