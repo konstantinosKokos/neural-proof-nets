@@ -298,12 +298,12 @@ class Parser(Module):
             decoder_input = new_decoder_input
             output_symbols = new_output_symbols
 
-            class_t = output_symbols[:, :, t]
+            class_t = output_symbols[:, :, t].view(b*beam_width)
 
-            next_embedding = self.atom_embedder.embed(class_t, t+1)
+            next_embedding = self.atom_embedder.embed(class_t, t+1).view(b, beam_width, self.dec_dim)
 
             if t != s_out - 1:
-                next_embedding = (next_embedding.repeat(1, beam_width, 1)).unsqueeze(2)
+                next_embedding = next_embedding.unsqueeze(2)
                 decoder_input = torch.cat([decoder_input, next_embedding], dim=2)
         output_symbols = torch.cat([sos_tokens.unsqueeze(1).repeat(1, beam_width, 1), output_symbols], dim=2)
         return output_symbols, decoder_output.view(b, beam_width, -1, self.dec_dim)
@@ -358,7 +358,6 @@ class Parser(Module):
             type_preds, output_reprs = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
                                                         stop_at=sent_lens, **kwargs)
             type_preds = type_preds.tolist()
-
 
         atom_seqs: List[List[Optional[List[strs]]]]
         # filter decoded atoms that count at least as many types as words
