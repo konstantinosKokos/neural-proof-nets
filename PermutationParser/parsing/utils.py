@@ -9,6 +9,7 @@ from PermutationParser.neural.utils import AtomTokenizer, tensorize_batch_indexe
 from PermutationParser.parsing.milltypes import (BoxType, DiamondType, WordType, polish_to_type,
                                                  get_polarities_and_indices, polarize_and_index_many,
                                                  polarize_and_index, invariance_check)
+from PermutationParser.parsing.lambdas import Graph, make_graph
 
 WordTypes = List[WordType]
 OWordType = Optional[WordType]
@@ -27,11 +28,13 @@ class Analysis:
     positive_ids: Optional[List[ints]] = None
     negative_ids: Optional[List[ints]] = None
     idx_to_polish: Optional[Dict[int, int]] = None
-    proof: Optional[Dict[int, int]] = None
+    axiom_links: Optional[Dict[int, int]] = None
+    proof_structure: Optional[Graph] = None
 
     def __init__(self, words: strs, types: Optional[WordTypes], conclusion: Optional[WordType], polish: Optional[strs],
                  atom_set: Optional[Atoms], positive_ids: Optional[List[ints]], negative_ids: Optional[List[ints]],
-                 idx_to_polish: Optional[Dict[int, int]], proof: Optional[Dict[int, int]] = None):
+                 idx_to_polish: Optional[Dict[int, int]], axiom_links: Optional[Dict[int, int]] = None,
+                 proof_structure: Optional[Graph] = None):
         self.words = words
         self.types = types
         self.conclusion = conclusion
@@ -40,7 +43,8 @@ class Analysis:
         self.positive_ids = positive_ids
         self.negative_ids = negative_ids
         self.idx_to_polish = idx_to_polish
-        self.proof = proof
+        self.axiom_links = axiom_links
+        self.proof_structure = proof_structure
 
     def __len__(self):
         return len(self.polish) if self.polish is not None else 0
@@ -49,9 +53,10 @@ class Analysis:
         return ', '.join([f'{w}: {t}' for w, t in zip(self.words, self.types)]) + f' ⊢ {self.conclusion}'
 
     def __eq__(self, other: 'Analysis') -> Optional[bool]:
-        if any(map(lambda x: x is None, [self.words, self.types, self.proof, other.words, other.types, other.proof])):
+        if any(map(lambda x: x is None, [self.words, self.types, self.axiom_links, other.words, other.types,
+                                         other.axiom_links])):
             return None
-        return self.words == other.words and self.types == other.types and self.proof == other.proof
+        return self.words == other.words and self.types == other.types and self.axiom_links == other.axiom_links
 
     def get_ids(self) -> Tuple[List[List[int]], List[List[int]]]:
         if self.positive_ids is None:
@@ -72,7 +77,8 @@ class Analysis:
                 n_idx = match[i]
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
-        self.proof = pnet
+        self.axiom_links = pnet
+        self.proof_structure = make_graph(self.types, self.conclusion, self.axiom_links)
 
 
 class TypeParser(object):
@@ -151,7 +157,6 @@ class TypeParser(object):
 def sample_to_analysis(sample: Sample) -> Analysis:
     words = sample.words
     types = sample.types
-    polished = sample.polish
 
     atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types)))))
     negative, positive = list(map(lambda x: reduce(add, x), atoms))
@@ -174,4 +179,4 @@ def sample_to_analysis(sample: Sample) -> Analysis:
 
     return Analysis(words=words, types=types, conclusion=conclusion_type,
                     polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
-                    idx_to_polish=polish_from_index, proof={k: v for k, v in sample.proof})
+                    idx_to_polish=polish_from_index, axiom_links={k: v for k, v in sample.proof})
