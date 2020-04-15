@@ -33,7 +33,7 @@ def load_model(parser: Parser, load: str, **kwargs) -> Tuple[int, Dict, int]:
 
 
 def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 64,
-         val_batch: int = 128, device: str = 'cuda', version: Optional[str] = None,
+         val_batch: int = 512, device: str = 'cuda', version: Optional[str] = None,
          save_to_dir: Optional[str] = None) \
         -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     if version is None:
@@ -80,7 +80,6 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
                                            ({'params': parser.atom_embedder.parameters()}, 1),
                                            ({'params': parser.atom_decoder.parameters()}, 1),
                                            ({'params': parser.atom_encoder.parameters()}, 1),
-                                           ({'params': parser.atom_classifier.parameters()}, 1),
                                            ({'params': parser.negative_transformation.parameters()}, 1)]))
 
     _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
