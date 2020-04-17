@@ -15,9 +15,14 @@ sys.modules['LassyExtraction.milltypes'] = milltypes
 Atoms = List[AtomicType]
 MWU = AtomicType('_MWU')
 
+_atom_collations = {'N': 'NP', 'VNW': 'NP', 'SPEC': 'NP', 'ADJ': 'AP'}
+
 
 def make_atom_set() -> Atoms:
-    return sorted(list(PtDict.values()) + list(CatDict.values()) + [MWU], key=lambda x: str(x))
+    atomset = set(PtDict.values()).union(set(CatDict.values())).union({MWU}).difference(
+        set(map(AtomicType, _atom_collations.keys()))
+    )
+    return sorted(atomset, key=lambda x: str(x))
 
 
 _atom_set = make_atom_set()
@@ -55,6 +60,8 @@ def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optiona
 
     if atom_set is None:
         atom_set = _atom_set
+
+    types = list(map(collate_type, types))
 
     words, types = preprocess_pairs(words, types)
 
@@ -108,6 +115,22 @@ def remove_polarity(indexed: str) -> str:
 
 def remove_polarities(indexed: strs) -> strs:
     return list(map(remove_polarity, indexed))
+
+
+def collate_atom(atom: str) -> str:
+    if atom in _atom_collations.keys():
+        return _atom_collations[atom]
+    return atom
+
+
+def collate_type(wordtype: WordType) -> WordType:
+    if isinstance(wordtype, AtomicType):
+        wordtype.type = collate_atom(wordtype.type)
+        return wordtype
+    else:
+        wordtype.argument = collate_type(wordtype.argument)
+        wordtype.result = collate_type(wordtype.result)
+        return wordtype
 
 
 def main() -> Tuple[List[Sample], List[Sample], List[Sample]]:
