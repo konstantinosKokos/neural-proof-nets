@@ -78,7 +78,7 @@ class Analysis:
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
         self.axiom_links = pnet
-        self.proof_structure = make_graph(self.types, self.conclusion, self.axiom_links)
+        # self.proof_structure = make_graph(self.types, self.conclusion, self.axiom_links)
 
 
 class TypeParser(object):
