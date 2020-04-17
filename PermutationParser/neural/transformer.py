@@ -20,11 +20,13 @@ class FFN(Module):
 
 
 class EncoderLayer(Module):
-    def __init__(self, num_heads: int, d_model: int, d_k: int, d_v: int, d_intermediate: int, dropout_rate: float) \
+    def __init__(self, num_heads: int, d_model: int, d_atn: int, d_v: int, d_intermediate: int, dropout_rate: float) \
             -> None:
         super(EncoderLayer, self).__init__()
         self.dropout_rate = dropout_rate
-        self.mha = MultiHeadAttention(num_heads, d_model, d_k, d_v)
+        self.mha = MultiHeadAttention(num_heads,
+                                      d_q_in=d_model, d_k_in=d_model, d_v_in=d_model, d_atn=d_atn, d_v=d_v,
+                                      d_out=d_model, dropout_rate=dropout_rate)
         self.ffn = FFN(d_model=d_model, d_ff=d_intermediate)
         self.ln_mha = LayerNorm(normalized_shape=d_model)
         self.ln_ffn = LayerNorm(normalized_shape=d_model)
@@ -53,65 +55,47 @@ def make_encoder(num_layers: int, num_heads: int, d_model: int, d_k: int, d_v: i
 
 
 class DecoderLayer(Module):
-    def __init__(self, num_heads: int, d_model: int, d_k: int, d_v: int, d_intermediate: int, dropout: float) \
-            -> None:
+    def __init__(self, num_heads_enc: int, num_heads_dec: int, d_encoder: int, d_decoder: int,
+                 d_atn_enc: int, d_atn_dec: int, d_v_enc: int, d_v_dec: int, d_interm: int, dropout_rate: float = 0.1):
         super(DecoderLayer, self).__init__()
-        self.dropout_rate = dropout
-        self.mask_mha = MultiHeadAttention(num_heads, d_model, d_k, d_v)
-        self.mha = MultiHeadAttention(num_heads, d_model, d_k, d_v)
-        self.ffn = FFN(d_model, d_intermediate)
-        self.ln_m_mha = LayerNorm(normalized_shape=d_model)
-        self.ln_mha = LayerNorm(normalized_shape=d_model)
-        self.ln_ffn = LayerNorm(normalized_shape=d_model)
-        self.dropout = Dropout(dropout)
+        self.dropout = Dropout(dropout_rate)
+        self.mask_mha = MultiHeadAttention(num_heads=num_heads_dec, d_q_in=d_decoder, d_k_in=d_decoder,
+                                           d_v_in=d_decoder, d_atn=d_atn_dec, d_v=d_v_dec,
+                                           d_out=d_decoder, dropout_rate=dropout_rate)
+        self.ln_masked_mha = LayerNorm(d_decoder)
+        self.mha = MultiHeadAttention(num_heads=num_heads_enc, d_q_in=d_decoder, d_k_in=d_encoder,
+                                      d_v_in=d_encoder, d_atn=d_atn_enc, d_v=d_v_enc,
+                                      d_out=d_decoder, dropout_rate=dropout_rate)
+        self.ln_mha = LayerNorm(d_decoder)
+        self.ffn = FFN(d_model=d_decoder, d_ff=d_interm, dropout_rate=dropout_rate)
+        self.ln_ffn = LayerNorm(d_decoder)
 
     def forward(self, inps: Tuple[Tensor, LongTensor, Tensor, LongTensor]) \
             -> Tuple[Tensor, LongTensor, Tensor, LongTensor]:
-        encoder_output, encoder_mask, decoder_input, decoder_mask = inps
+        encoder_out, encoder_mask, decoder_in, decoder_mask = inps
 
-        t = decoder_input.shape[1]
-        x_drop = self.dropout(decoder_input)
-        m_mha_x = self.mask_mha(x_drop, x_drop, x_drop, decoder_mask)
-        m_mha_x = self.dropout(m_mha_x)
-        m_mha_x = m_mha_x + x_drop
-        m_mha_x = self.ln_m_mha(m_mha_x)
+        t = decoder_in.shape[1]
 
-        mha_x = self.mha(m_mha_x, encoder_output, encoder_output, encoder_mask[:, :t, :])
-        mha_x = self.dropout(mha_x)
-        mha_x = mha_x + m_mha_x
-        mha_x = self.ln_mha(mha_x)
+        x_drop = self.dropout(decoder_in)
+        dec_atn = self.mask_mha(x_drop, x_drop, x_drop, decoder_mask)
+        dec_atn = dec_atn + x_drop
+        dec_atn = self.ln_masked_mha(dec_atn)
 
-        ffn_x = self.ffn(mha_x)
-        ffn_x = self.dropout(ffn_x)
-        ffn_x = ffn_x + mha_x
-        ffn_x = self.ln_ffn(ffn_x)
+        enc_dec_atn = self.mha(dec_atn, encoder_out, encoder_out, encoder_mask[:, :t, :])
+        enc_dec_atn = self.dropout(enc_dec_atn)
+        enc_dec_atn = dec_atn + enc_dec_atn
+        enc_dec_atn = self.ln_mha(enc_dec_atn)
 
-        return encoder_output, encoder_mask, ffn_x, decoder_mask
-
-    def infer(self, inps: Tuple[Tensor, LongTensor, Tensor, LongTensor], t: int) \
-            -> Tuple[Tensor, LongTensor, Tensor, LongTensor]:
-        encoder_output, encoder_mask, decoder_input, decoder_mask = inps
-
-        x_drop = self.dropout(decoder_input)
-        m_mha_x = self.mask_mha(x_drop, x_drop, x_drop, decoder_mask)
-        m_mha_x = self.dropout(m_mha_x)
-        m_mha_x = m_mha_x + x_drop
-        m_mha_x = self.ln_m_mha(m_mha_x)
-
-        mha_x = self.mha(m_mha_x, encoder_output, encoder_output, encoder_mask[:, :t, :])
-        mha_x = self.dropout(mha_x)
-        mha_x = mha_x + m_mha_x
-        mha_x = self.ln_mha(mha_x)
-
-        ffn_x = self.ffn(mha_x)
-        ffn_x = self.dropout(ffn_x)
-        ffn_x = ffn_x + mha_x
-        ffn_x = self.ln_ffn(ffn_x)
-
-        return encoder_output, encoder_mask, ffn_x, decoder_mask
+        out = self.ffn(enc_dec_atn)
+        out = self.dropout(out)
+        out = out + enc_dec_atn
+        out = self.ln_ffn(out)
+        return encoder_out, encoder_mask, out, decoder_mask
 
 
-def make_decoder(num_layers: int, num_heads: int, d_model: int, d_k: int, d_v: int, d_intermediate: int,
-                 dropout: float = 0.1) -> Sequential:
-    return Sequential(*[DecoderLayer(num_heads, d_model, d_k, d_v, d_intermediate, dropout)
+def make_decoder(num_layers: int, num_heads_enc: int, num_heads_dec: int, d_encoder: int, d_decoder: int,
+                 d_atn_enc: int, d_atn_dec: int, d_v_enc: int, d_v_dec: int, d_interm: int, dropout_rate: float = 0.1):
+    return Sequential(*[DecoderLayer(num_heads_enc=num_heads_enc, num_heads_dec=num_heads_dec,
+                                     d_encoder=d_encoder, d_decoder=d_decoder, d_atn_enc=d_atn_enc, d_atn_dec=d_atn_dec,
+                                     d_v_enc=d_v_enc, d_v_dec=d_v_dec, d_interm=d_interm, dropout_rate=dropout_rate)
                         for _ in range(num_layers)])

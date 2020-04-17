@@ -29,20 +29,20 @@ def scaled_dot_product(queries: Tensor, keys: Tensor, values: Tensor,
 
 
 class MultiHeadAttention(Module):
-    def __init__(self, num_heads: int, d_model: int, d_k: int, d_v: int, dropout_rate: float = 0.1) -> None:
+    def __init__(self, num_heads: int, d_q_in: int, d_k_in: int, d_v_in: int,
+                 d_atn: int, d_v: int, d_out: int, dropout_rate: float = 0.1) -> None:
         super(MultiHeadAttention, self).__init__()
-        self.q_transformations = ModuleList([Linear(in_features=d_model, out_features=d_k, bias=False)
+        self.q_transformations = ModuleList([Linear(in_features=d_q_in, out_features=d_atn, bias=False)
                                              for _ in range(num_heads)])
-        self.k_transformations = ModuleList([Linear(in_features=d_model, out_features=d_k, bias=False)
+        self.k_transformations = ModuleList([Linear(in_features=d_k_in, out_features=d_atn, bias=False)
                                              for _ in range(num_heads)])
-        self.v_transformations = ModuleList([Linear(in_features=d_model, out_features=d_v, bias=False)
+        self.v_transformations = ModuleList([Linear(in_features=d_v_in, out_features=d_v, bias=False)
                                              for _ in range(num_heads)])
-        self.Wo = Linear(in_features=num_heads * d_v, out_features=d_model, bias=False)
+        self.wo = Linear(in_features=num_heads * d_v, out_features=d_out, bias=False)
         self.dropout = Dropout(dropout_rate)
 
-    def forward(self, queries: Tensor, keys: Tensor, values: Tensor,
-                mask: Optional[LongTensor] = None) -> Tensor:
+    def forward(self, queries: Tensor, keys: Tensor, values: Tensor, mask: Optional[LongTensor] = None) -> Tensor:
         mha = multihead_attn_fn(queries, keys, values, self.q_transformations, self.k_transformations,
                                 self.v_transformations, mask)
         mha = self.dropout(mha)
-        return self.Wo(mha)
+        return self.wo(mha)
