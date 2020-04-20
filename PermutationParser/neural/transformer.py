@@ -9,8 +9,8 @@ from PermutationParser.neural.multi_head_atn import MultiHeadAttention
 class FFN(Module):
     def __init__(self, d_model: int, d_ff: int, dropout_rate: float = 0.1):
         super(FFN, self).__init__()
-        self.linear_one = Linear(d_model, d_ff, bias=False)
-        self.linear_two = Linear(d_ff, d_model, bias=False)
+        self.linear_one = Linear(d_model, d_ff, bias=True)
+        self.linear_two = Linear(d_ff, d_model, bias=True)
         self.dropout = Dropout(dropout_rate)
 
     def forward(self, x: Tensor) -> Tensor:
