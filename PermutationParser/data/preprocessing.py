@@ -15,7 +15,8 @@ sys.modules['LassyExtraction.milltypes'] = milltypes
 Atoms = List[AtomicType]
 MWU = AtomicType('_MWU')
 
-_atom_collations = {'N': 'NP', 'VNW': 'NP', 'SPEC': 'NP', 'ADJ': 'AP'}
+# _atom_collations = {'N': 'NP', 'VNW': 'NP', 'SPEC': 'NP', 'ADJ': 'AP'}
+_atom_collations = dict()
 
 
 def make_atom_set() -> Atoms:
@@ -80,7 +81,7 @@ def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optiona
                             list(map(lambda _sep: [item[1] for item in _sep], negative_sep))))))
 
     polished = polish_fn([PolarizedType(wordtype=str(conclusion[0]), polarity=False, index=conclusion[1])] + types)
-    positional_ids = index_from_polish(polished, offset=-1)
+    positional_ids = index_from_polish(polished, offset=0)
 
     positive_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
                             positive_sep))
