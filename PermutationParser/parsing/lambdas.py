@@ -5,11 +5,16 @@ from dataclasses import dataclass
 IntMapping = Dict[int, int]
 StrMapping = Dict[str, str]
 
-SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+SUB = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
+SUP = str.maketrans('abcdefghijklmnoprstuvwxyz1', 'ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ¹')
 
 
-def translate(idx: int) -> str:
+def translate_id(idx: int) -> str:
     return str(idx).translate(SUB)
+
+
+def translate_decoration(decoration: str) -> str:
+    return decoration.lower().translate(SUP)
 
 
 @dataclass
@@ -18,12 +23,14 @@ class Node:
     name: str
     polarity: bool
     terminal: bool
+    decoration: str = ''
 
-    def __init__(self, idx: str, name: str, polarity: bool, terminal: bool):
+    def __init__(self, idx: str, name: str, polarity: bool, terminal: bool, decoration: str = ''):
         self.idx = idx
         self.name = name
         self.polarity = polarity
         self.terminal = terminal
+        self.decoration = decoration
 
     def __hash__(self):
         return (self.idx, self.name, self.polarity).__hash__()
@@ -95,7 +102,8 @@ def make_intra_graphs(word: str, wordtype: WordType, polarity: bool = True, pare
         left_id = '.'.join(list(map(str, get_type_indices(wordtype.argument))))
         right_id = '.'.join(list(map(str, get_type_indices(wordtype.result))))
         # init the implication node
-        node = Node(idx=f'{left_id} | {right_id}', polarity=polarity, name=word, terminal=False)
+        node = Node(idx=f'{left_id} | {right_id}', polarity=polarity, name=word, terminal=False,
+                    decoration=get_decoration(wordtype))
         edge = {(parent, node.idx)} if parent is not None else set()
         current_decoration = get_decoration(wordtype)
         left_nodes, left_edges = make_intra_graphs(word, wordtype.argument, not polarity, node.idx)
@@ -116,7 +124,7 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
             ret, varcount = traverse(graph, backward_dict[idx], forward_dict, backward_dict, not upward, varcount)
             return ret, varcount
         else:
-            ret = f'λx{translate(varcount)}.'
+            ret = f'λx{translate_id(varcount)}.'
             varcount += 1
             ret2, varcount = traverse(graph, graph.to_output(node).idx, forward_dict, backward_dict, upward,
                                       varcount)
@@ -126,15 +134,18 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
         if not graph.downward(node):
             # terminal root case
             if node.terminal:
-                ret = f'{node.name}'
+                ret = f' {node.name}'
                 return ret, varcount
             else:
                 # root impl case, move to other branch, switch mode
                 if node.polarity:
-                    ret = f'({node.name} '
+                    ret = f'({node.name}'
                     ret2, varcount = traverse(graph, graph.to_output(node).idx, forward_dict, backward_dict, not upward,
                                               varcount)
-                    return ret+f'{ret2}) ', varcount
+                    if node.decoration in {'mod', 'app', 'predm', 'det'}:
+                        return f'{ret}{translate_decoration(node.decoration)} {ret2})', varcount
+                    else:
+                        return f'{ret} {ret2}{translate_decoration(node.decoration)})', varcount
                 else:
                     raise NotImplementedError
         else:
@@ -143,11 +154,15 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
                     ret, varcount = traverse(graph, graph.to_input(node).idx, forward_dict, backward_dict, upward, varcount)
                     return ret, varcount
                 except AssertionError:
-                    ret = f'{translate(varcount-1)}'
+                    ret = f'x{translate_id(varcount - 1)}'
                     return ret, varcount
             else:
                 ret2, varcount = traverse(graph, graph.to_input(node).idx, forward_dict, backward_dict, upward, varcount)
                 ret3, varcount = traverse(graph, graph.to_output(node).idx, forward_dict, backward_dict, not upward,
                                           varcount)
-                return f'({ret2+ret3})', varcount
+                if node.decoration in {'mod', 'app', 'predm', 'det'}:
+                    ret2 += translate_decoration(node.decoration)
+                else:
+                    ret3 += translate_decoration(node.decoration)
+                return f'({ret2} {ret3})', varcount
 

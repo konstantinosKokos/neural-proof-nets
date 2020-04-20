@@ -9,7 +9,7 @@ from PermutationParser.neural.utils import AtomTokenizer, tensorize_batch_indexe
 from PermutationParser.parsing.milltypes import (BoxType, DiamondType, WordType, polish_to_type,
                                                  get_polarities_and_indices, polarize_and_index_many,
                                                  polarize_and_index, invariance_check)
-from PermutationParser.parsing.lambdas import Graph, make_graph, IntMapping
+from PermutationParser.parsing.lambdas import Graph, make_graph, IntMapping, traverse
 
 WordTypes = List[WordType]
 OWordType = Optional[WordType]
@@ -30,11 +30,12 @@ class Analysis:
     idx_to_polish: Optional[IntMapping] = None
     axiom_links: Optional[IntMapping] = None
     proof_structure: Optional[Graph] = None
+    lambda_term: Optional[str] = None
 
     def __init__(self, words: strs, types: Optional[WordTypes], conclusion: Optional[WordType], polish: Optional[strs],
                  atom_set: Optional[Atoms], positive_ids: Optional[List[ints]], negative_ids: Optional[List[ints]],
                  idx_to_polish: Optional[IntMapping], axiom_links: Optional[IntMapping] = None,
-                 proof_structure: Optional[Graph] = None):
+                 proof_structure: Optional[Graph] = None, lambda_term: str = None):
         self.words = words
         self.types = types
         self.conclusion = conclusion
@@ -45,6 +46,7 @@ class Analysis:
         self.idx_to_polish = idx_to_polish
         self.axiom_links = axiom_links
         self.proof_structure = proof_structure
+        self.lambda_term = lambda_term
 
     def __len__(self):
         return len(self.polish) if self.polish is not None else 0
@@ -78,7 +80,12 @@ class Analysis:
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
         self.axiom_links = pnet
-        # self.proof_structure = make_graph(self.types, self.conclusion, self.axiom_links)
+        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion)
+        self.lambda_term = traverse(self.proof_structure, str(self.conclusion.index),
+                                    {str(k): str(v) for k, v in self.axiom_links.items()},
+                                    {str(v): str(k) for k, v in self.axiom_links.items()},
+                                    True,
+                                    0)[0]
 
 
 class TypeParser(object):
