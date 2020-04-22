@@ -119,7 +119,11 @@ class TypeParser(object):
 
     def polish_to_type(self, polished: strs) -> Optional[WordType]:
         try:
-            return polish_to_type(polished, self.operators, self.operator_classes)
+            ret = polish_to_type(polished, self.operators, self.operator_classes)
+            if isinstance(ret, WordType):
+                return ret
+            else:
+                return None
         except Exception:
             return None
 
