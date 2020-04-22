@@ -416,4 +416,7 @@ def polish_to_type(symbols: strings, operators: Set[str],
                 stack.append(op_class(arg, res))
         else:
             stack.append(symbol)
-    return stack.pop()
+    ret = stack.pop()
+    assert not stack
+    assert isinstance(ret, WordType)
+    return ret

@@ -95,6 +95,7 @@ class TypeParser(object):
 
     def analyze_beam_batch(self, sents: strs, polishes: List[List[Optional[List[strs]]]]) \
             -> List[Tuple[Tuple[int, int], int, Analysis]]:
+
         typings: List[List[Optional[OWordTypes]]]
         typings = [[self.sent_to_types(polish) for polish in beam] for beam in polishes]
         polarized: List[List[Optional[OWordTypes]]]
@@ -119,12 +120,10 @@ class TypeParser(object):
 
     def polish_to_type(self, polished: strs) -> Optional[WordType]:
         try:
-            ret = polish_to_type(polished, self.operators, self.operator_classes)
-            if isinstance(ret, WordType):
-                return ret
-            else:
-                return None
-        except Exception:
+            return polish_to_type(polished, self.operators, self.operator_classes)
+        except AssertionError:
+            return None
+        except IndexError:
             return None
 
     def sent_to_types(self, sent: Optional[List[strs]]) -> Optional[OWordTypes]:
