@@ -35,7 +35,7 @@ class Parser(Module):
         self.unfrozen_blocks = set(range(12))
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.atom_decoder = make_decoder(num_layers=6, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.atom_decoder = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                          d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                          d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
                                          d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
@@ -352,13 +352,10 @@ class Parser(Module):
             # axiom linking
             link_weights = self.link_train(output_reprs, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
-            grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
-                                 for link, perm in zip(link_weights, grouped_permutors)]
             link_loss = sum((
-                functional.binary_cross_entropy(link, perm, reduction='mean')
-                for link, perm in zip(link_weights, grouped_permutors)
-            ))
-            mutual_loss = link_loss * linking_weight + supertagging_loss
+                functional.nll_loss(link, perm, reduction='sum') for link, perm in zip(link_weights, grouped_permutors)
+            )) * linking_weight
+            mutual_loss = link_loss + supertagging_loss
             mutual_loss.backward()
 
         optimizer.step()
@@ -460,7 +457,7 @@ class Parser(Module):
         positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
 
         links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
-        links = [[link.argmax(dim=1).tolist()[0] for link in sent] for sent in links_]
+        links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
         for pa, link in zip(analyses, links):
             pa.fill_matches(link)
 

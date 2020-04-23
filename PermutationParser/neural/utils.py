@@ -140,16 +140,13 @@ def make_atom_mapping(samples: List[Sample]) -> Mapping[str, int]:
 
 
 def tensorize_matrix(matrix: Matrix) -> LongTensor:
-    def index_truth(_matrix: Matrix) -> ints:
-        return [row.index(True) for row in _matrix]
-
-    return LongTensor(index_truth(matrix))
+    return LongTensor(matrix).argmax(dim=-1)
 
 
 def measure_linking_accuracy(pred: List[Tensor], truth: List[LongTensor]) -> Tuple[int, int]:
     def measure_one(pred_one: Tensor, truth_one: LongTensor) -> Tuple[int, int]:
         b, n = pred_one.shape[0:2]
-        return torch.sum(pred_one.argmax(dim=1) == truth_one).item(), b * n
+        return torch.sum(pred_one.argmax(dim=-1) == truth_one).item(), b * n
 
     measurements = list(map(measure_one, pred, truth))
     correct, total = list(zip(*measurements))
