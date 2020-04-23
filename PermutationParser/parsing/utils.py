@@ -70,6 +70,7 @@ class Analysis:
         neg: ints
         match: ints
         pnet: IntMapping = dict()
+        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion)
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
@@ -79,8 +80,10 @@ class Analysis:
                 n_idx = match[i]
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
+        if not all(list(map(lambda n: n in pnet.values(), self.negative_ids))):
+            return None
+
         self.axiom_links = pnet
-        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion)
         self.lambda_term = traverse(self.proof_structure, str(self.conclusion.index),
                                     {str(k): str(v) for k, v in self.axiom_links.items()},
                                     {str(v): str(k) for k, v in self.axiom_links.items()},
