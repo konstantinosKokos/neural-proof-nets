@@ -18,8 +18,8 @@ def translate_decoration(decoration: str) -> str:
     return decoration.lower().translate(SUP)
 
 
-def translate_type(wordtype: str) -> str:
-    return wordtype.upper().translate(TYPES)
+def translate_type(wordtype: WordType) -> str:
+    return str(wordtype).upper().translate(TYPES)
 
 
 @dataclass
