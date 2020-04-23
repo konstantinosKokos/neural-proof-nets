@@ -51,7 +51,7 @@ class Parser(Module):
         raise NotImplementedError('Forward not implemented.')
 
     @staticmethod
-    def sinkhorn(x: Tensor, tau: int = 1, iters: int = 5, eps: float = 1e-18) -> Tensor:
+    def sinkhorn(x: Tensor, iters: int, tau: int = 1, eps: float = 1e-18) -> Tensor:
         return sinkhorn_fn(x, tau=tau, iters=iters, eps=eps)
 
     def freeze_encoder(self) -> None:
@@ -74,6 +74,10 @@ class Parser(Module):
 
     def eval(self) -> None:
         self.train(False)
+
+    def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = torch.FloatTensor) -> 'Parser':
+        self.device = self.device if device is None else device
+        return self.to(device=device, dtype=dtype)
 
     def make_mask(self, inps: LongTensor, padding_id: int) -> LongTensor:
         mask = torch.ones_like(inps)
@@ -133,7 +137,8 @@ class Parser(Module):
         return output_reprs, encoder_output, atom_embeddings, extended_encoder_mask
 
     def link(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
-             pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], exclude_singular: bool = True) \
+             pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], exclude_singular: bool = True,
+             sinkhorn_iters: int = 3) \
             -> List[Tensor]:
 
         atom_reprs = self.encode_atoms(atom_reprs, atom_mask, word_reprs, word_mask)
@@ -167,11 +172,18 @@ class Parser(Module):
             this_shape_negatives = self.negative_transformation(this_shape_negatives)
             weights = torch.bmm(this_shape_positives,
                                 this_shape_negatives.transpose(2, 1))
-            matches.append(self.sinkhorn(weights))
+            matches.append(self.sinkhorn(weights, iters=sinkhorn_iters))
         return matches
 
+    def link_train(self, *args, **kwargs) -> List[Tensor]:
+        return self.link(*args, **kwargs, sinkhorn_iters=3)
+
+    def link_eval(self, *args, **kwargs) -> List[Tensor]:
+        return self.link(*args, **kwargs, sinkhorn_iters=10)
+
     def link_slow(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
-                  pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]]) -> List[List[Tensor]]:
+                  pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], sinkhorn_iters: int = 10)\
+            -> List[List[Tensor]]:
 
         atom_reprs = self.encode_atoms(atom_reprs, atom_mask, word_reprs, word_mask)
 
@@ -184,7 +196,7 @@ class Parser(Module):
             local = []
             for pos, neg in sent:
                 weights = self.dropout(pos) @ self.negative_transformation(self.dropout(neg)).transpose(-1, -2)
-                local.append(self.sinkhorn(weights.unsqueeze(0)))
+                local.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ret.append(local)
         return ret
 
@@ -343,7 +355,7 @@ class Parser(Module):
             link_loss = 0
         else:
             # axiom linking
-            link_weights = self.link(output_reprs, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
+            link_weights = self.link_train(output_reprs, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
             grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
                                  for link, perm in zip(link_weights, grouped_permutors)]
@@ -382,7 +394,7 @@ class Parser(Module):
 
         if link:
             # linking
-            links = self.link(atom_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
+            links = self.link_eval(atom_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
             permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty=20,
                                                                          exclude_singular=False)]
 
@@ -423,13 +435,13 @@ class Parser(Module):
 
         if beam_size == 1:
             temp = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
-            type_preds, atom_embeddings, encoder_output, wmask, _ = temp
+            type_preds, atom_embeddings, encoder_output, wmask_, _ = temp
             type_preds = list(map(lambda x: [x], type_preds.tolist()))
             atom_embeddings = atom_embeddings.unsqueeze(1)
         else:
             temp = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
                                     stop_at=sent_lens, **kwargs)
-            type_preds, atom_embeddings, encoder_output, wmask, _ = temp
+            type_preds, atom_embeddings, encoder_output, wmask_, _ = temp
             type_preds = type_preds.tolist()
 
         atom_seqs: List[List[Optional[List[strs]]]]
@@ -443,12 +455,16 @@ class Parser(Module):
         atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
 
         atom_reprs = torch.zeros(len(ids), max(atom_lens) - 1, self.dec_dim, device=self.device)
+        word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
+        wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
         for i, (s, b) in enumerate(ids):
             atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens) - 1]
+            word_reprs[i] = encoder_output[s]
+            wmask[i] = wmask_[s]
 
         positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
 
-        links_ = self.link_slow(atom_reprs, atom_mask, encoder_output, wmask, positive_ids, negative_ids)
+        links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
         links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
         for pa, link in zip(analyses, links):
             pa.fill_matches(link)
