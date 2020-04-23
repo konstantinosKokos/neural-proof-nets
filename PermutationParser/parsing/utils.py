@@ -80,7 +80,7 @@ class Analysis:
                 n_idx = match[i]
                 n = neg[n_idx]
                 pnet[self.idx_to_polish[p]] = self.idx_to_polish[n]
-        if not all(list(map(lambda n: n in pnet.values(), self.negative_ids))):
+        if not len(set(pnet.keys())) == len(set(pnet.values())):
             return None
 
         self.axiom_links = pnet
