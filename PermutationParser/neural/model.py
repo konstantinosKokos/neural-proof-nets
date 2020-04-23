@@ -27,7 +27,7 @@ class Parser(Module):
         self.type_parser = TypeParser(atokenizer)
         self.tokenizer = tokenizer
         self.dropout = Dropout(0.1)
-        self.enc_heads = 12
+        self.enc_heads = 8
         self.dec_heads = 8
 
         self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
@@ -35,16 +35,12 @@ class Parser(Module):
         self.unfrozen_blocks = set(range(12))
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.atom_decoder = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.atom_decoder = make_decoder(num_layers=6, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                          d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                          d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
-                                         d_v_enc=self.enc_dim//12, d_v_dec=self.dec_dim//8, d_interm=self.dec_dim * 2,
-                                         dropout_rate=0.1).to(device)
+                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+                                         d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.atom_embedder = ComplexEmbedding(self.num_embeddings, dec_dim//2).to(device)
-        self.atom_encoder = make_decoder(num_layers=2, num_heads_enc=12, num_heads_dec=8, d_encoder=self.enc_dim,
-                                         d_decoder=self.dec_dim, d_atn_enc=self.enc_dim//12, d_atn_dec=self.dec_dim//2,
-                                         d_v_enc=self.enc_dim//12, d_v_dec=self.dec_dim//8, d_interm=self.dec_dim * 2,
-                                         dropout_rate=0.1).to(device)
         self.negative_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
 
     def forward(self, *args) -> NoReturn:
@@ -68,7 +64,6 @@ class Parser(Module):
         self.atom_decoder.train(mode)
         self.negative_transformation.train(mode)
         self.dropout.train(mode)
-        self.atom_encoder.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
 
@@ -116,7 +111,7 @@ class Parser(Module):
         s_out = atom_reprs.shape[1]
         if s_out == 0:
             return atom_reprs
-        return self.atom_encoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
+        return self.atom_decoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
 
     def decode_train(self, lexical_token_ids: LongTensor, symbol_ids: LongTensor) \
             -> Tuple[Tensor, Tensor, Tensor, LongTensor]:

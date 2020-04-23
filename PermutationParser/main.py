@@ -32,8 +32,8 @@ def load_model(parser: Parser, load: str, **kwargs) -> Tuple[int, Dict, int]:
     return step_num, opt_state_dict, epoch
 
 
-def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 64,
-         val_batch: int = 512, device: str = 'cuda', version: Optional[str] = None,
+def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 32,
+         val_batch: int = 256, device: str = 'cuda', version: Optional[str] = None,
          save_to_dir: Optional[str] = None) \
         -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     if version is None:
@@ -72,19 +72,18 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
     else:
         train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
 
-    schedule = make_cosine_schedule_with_restarts(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
-                                                  restart_every=restart_epochs * nbatches,
-                                                  decay_over=num_epochs * nbatches)
+    schedule = make_linear_schedule_with_cosine_restarts(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
+                                                         restart_every=restart_epochs * nbatches,
+                                                         decay_over=num_epochs * nbatches)
 
     param_groups, grad_scales = list(zip(*[({'params': parser.word_encoder.parameters()}, 0.1),
                                            ({'params': parser.atom_embedder.parameters()}, 1),
                                            ({'params': parser.atom_decoder.parameters()}, 1),
-                                           ({'params': parser.atom_encoder.parameters()}, 1),
                                            ({'params': parser.negative_transformation.parameters()}, 1)]))
 
     _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
     opt = Scheduler(_opt, schedule, grad_scales)
-    fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer) + 1, 0.1)
+    fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1)
 
     if model_path is not None:
         step_num, opt_dict, init_epoch = load_model(parser, model_path)
