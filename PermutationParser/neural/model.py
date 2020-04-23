@@ -21,7 +21,7 @@ class Parser(Module):
         super(Parser, self).__init__()
         self.enc_dim = enc_dim
         self.dec_dim = dec_dim
-        self.num_embeddings = len(atokenizer) + 1
+        self.num_embeddings = len(atokenizer)
         self.device = device
         self.atom_tokenizer = atokenizer
         self.type_parser = TypeParser(atokenizer)
@@ -465,7 +465,7 @@ class Parser(Module):
         positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
 
         links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
-        links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
+        links = [[link.argmax(dim=1).tolist()[0] for link in sent] for sent in links_]
         for pa, link in zip(analyses, links):
             pa.fill_matches(link)
 
