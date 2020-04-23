@@ -38,13 +38,13 @@ def make_cosine_window(max_lr: float, offset: int, decay_over: int) -> Callable[
 def make_cosine_schedule_with_restarts(max_lr: float, warmup_steps: int, restart_every: int,
                                        decay_over: int) -> Callable[[int], float]:
     linear_factor = max_lr / warmup_steps
-    outer_cos_fn = make_cosine_window(max_lr, offset=warmup_steps, decay_over=decay_over)
+    envelope = make_cosine_window(max_lr, offset=warmup_steps, decay_over=decay_over)
 
     def schedule(step: int) -> float:
         if step < warmup_steps:
             return linear_factor * step
         else:
-            outer_factor = outer_cos_fn(step)
+            outer_factor = envelope(step)
             current_restart = (step - warmup_steps) // restart_every
             offset = warmup_steps + current_restart * restart_every
             inner_cos_fn = make_cosine_window(max_lr=outer_factor,
@@ -52,7 +52,32 @@ def make_cosine_schedule_with_restarts(max_lr: float, warmup_steps: int, restart
                                               decay_over=restart_every)
 
             return inner_cos_fn(step)
+    return schedule
 
+
+def make_linear_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, restart_every: int,
+                                              decay_over: int) -> Callable[[int], float]:
+    linear_factor = max_lr / warmup_steps
+    envelope = linear_envelope(max_lr, warmup_steps, decay_over)
+
+    def schedule(step: int) -> float:
+        if step < warmup_steps:
+            return linear_factor * step
+        else:
+            outer_factor = envelope(step)
+            current_restart = (step - warmup_steps) // restart_every
+            offset = warmup_steps + current_restart * restart_every
+            inner_cos_fn = make_cosine_window(max_lr=outer_factor,
+                                              offset=offset,
+                                              decay_over=restart_every)
+
+            return inner_cos_fn(step)
+    return schedule
+
+
+def linear_envelope(max_lr: float, offset: int, decay_over: int) -> Callable[[int], float]:
+    def schedule(step):
+        return (decay_over - step) * max_lr / (decay_over - offset)
     return schedule
 
 
