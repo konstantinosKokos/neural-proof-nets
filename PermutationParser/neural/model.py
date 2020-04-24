@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import BertModel
 
-from PermutationParser.neural.sinkhorn import sinkhorn_fn
+from PermutationParser.neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
 from PermutationParser.neural.utils import *
 from PermutationParser.neural.embedding import ComplexEmbedding
 from PermutationParser.parsing.utils import TypeParser, Analysis
@@ -48,7 +48,7 @@ class Parser(Module):
 
     @staticmethod
     def sinkhorn(x: Tensor, iters: int, tau: int = 1, eps: float = 1e-18) -> Tensor:
-        return sinkhorn_fn(x, tau=tau, iters=iters, eps=eps)
+        return sinkhorn(x, tau=tau, iters=iters, eps=eps)
 
     def freeze_encoder(self) -> None:
         for param in self.word_encoder.parameters():
@@ -141,13 +141,8 @@ class Parser(Module):
         _positives: List[List[Tensor]] = make_sinkhorn_inputs(atom_reprs, pos_idxes, self.device)
         _negatives: List[List[Tensor]] = make_sinkhorn_inputs(atom_reprs, neg_idxes, self.device)
 
-        positives: List[Tensor] = list(filter(lambda tensor:
-                                              min(tensor.size()) != 0,
-                                              chain.from_iterable(_positives)))
-
-        negatives: List[Tensor] = list(filter(lambda tensor:
-                                              min(tensor.size()) != 0,
-                                              chain.from_iterable(_negatives)))
+        positives = [tensor for tensor in chain.from_iterable(_positives) if min(tensor.size()) != 0]
+        negatives = [tensor for tensor in chain.from_iterable(_negatives) if min(tensor.size()) != 0]
 
         distinct_shapes = set(map(lambda tensor: tensor.size()[0], positives))
         if exclude_singular:
@@ -157,10 +152,10 @@ class Parser(Module):
         matches: List[Tensor] = []
 
         all_shape_positives: List[Tensor] \
-            = [self.dropout(torch.stack(list(filter(lambda tensor: tensor.size()[0] == shape, positives))))
+            = [self.dropout(torch.stack([tensor for tensor in positives if tensor.size()[0] == shape]))
                for shape in distinct_shapes]
         all_shape_negatives: List[Tensor] \
-            = [self.dropout(torch.stack(list(filter(lambda tensor: tensor.size()[0] == shape, negatives))))
+            = [self.dropout(torch.stack([tensor for tensor in negatives if tensor.size()[0] == shape]))
                for shape in distinct_shapes]
 
         for this_shape_positives, this_shape_negatives in zip(all_shape_positives, all_shape_negatives):
@@ -342,8 +337,7 @@ class Parser(Module):
 
         # supertagging
         type_predictions = self.predict_atoms(output_reprs[:, :-1], 1)  # no predict on last token
-        type_predictions = type_predictions.permute(0, 2, 1)
-        supertagging_loss = loss_fn(type_predictions, types[:, 1:].to(self.device))
+        supertagging_loss = loss_fn(type_predictions.contiguous(), types[:, 1:].contiguous().to(self.device))
 
         if linking_weight == 0:
             supertagging_loss.backward()
@@ -353,7 +347,8 @@ class Parser(Module):
             link_weights = self.link_train(output_reprs, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
             link_loss = sum((
-                functional.nll_loss(link, perm, reduction='sum') for link, perm in zip(link_weights, grouped_permutors)
+                functional.nll_loss(link, perm, reduction='sum') / (link.shape[0] * link.shape[1])
+                for link, perm in zip(link_weights, grouped_permutors)
             )) * linking_weight
             mutual_loss = link_loss + supertagging_loss
             mutual_loss.backward()

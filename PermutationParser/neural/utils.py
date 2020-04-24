@@ -220,12 +220,13 @@ class FuzzyLoss(Module):
         self.ignore_index = ignore_index
 
     def __call__(self, x: Tensor, y: LongTensor) -> Tensor:
-        y_float = torch.zeros(x.shape[0], self.nc, x.shape[2], device=x.device, dtype=torch.float)
-        y_float.fill_(self.mass_redistribution / (self.nc - 1))
+        y = y.flatten()
+        y_float = torch.zeros(x.shape[0] * x.shape[1], self.nc, device=x.device, dtype=torch.float)
+        y_float.fill_(self.mass_redistribution / (self.nc-2))
         y_float.scatter_(1, y.unsqueeze(1), 1 - self.mass_redistribution)
         mask = y == self.ignore_index
-        y_float[mask.unsqueeze(1).repeat(1, self.nc, 1)] = 0
-        return self.loss_fn(torch.log_softmax(x, dim=1), y_float)
+        y_float[mask.unsqueeze(1).repeat(1, self.nc)] = 0
+        return self.loss_fn(torch.log_softmax(x.view(-1, self.nc), dim=-1), y_float)
 
 
 def sigsoftmax(x: Tensor, dim: int) -> Tensor:
