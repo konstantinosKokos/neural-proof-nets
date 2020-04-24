@@ -190,6 +190,11 @@ def sample_to_analysis(sample: Sample) -> Analysis:
     negative_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
                             negative_sep))
 
+    pstruct = make_graph(words + ['conc'], [t for t in types if t != MWU], conclusion_type)
+    lambda_term = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
+                           {str(v): str(k) for k, v in sample.proof}, True, 0)[0]
+
     return Analysis(words=words, types=types, conclusion=conclusion_type,
                     polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
-                    idx_to_polish=polish_from_index, axiom_links={k: v for k, v in sample.proof})
+                    idx_to_polish=polish_from_index, axiom_links={k: v for k, v in sample.proof},
+                    proof_structure=pstruct, lambda_term=lambda_term)
