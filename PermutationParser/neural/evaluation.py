@@ -16,7 +16,7 @@ def make_stuff() -> Tuple[Parser, List[Sample]]:
     train, dev, test = load_stored()
     parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 128, 'cpu')
     parser.load_state_dict(torch.load('./stored_models/dd/200.model', map_location='cpu')['model_state_dict'])
-    return parser, test
+    return parser, sorted(test, key=lambda x: len(x.polish))
 
 
 def infer_dataset(model: Parser, data: List[Sample], beam_size: int = 5, batch_size: int = 64) -> List[List[Analysis]]:
