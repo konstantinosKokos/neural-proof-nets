@@ -35,13 +35,18 @@ class Parser(Module):
         self.unfrozen_blocks = set(range(12))
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.atom_decoder = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.atom_decoder = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                          d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                          d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
                                          d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
                                          d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.atom_embedder = ComplexEmbedding(self.num_embeddings, dec_dim//2).to(device)
-        self.negative_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
+        self.atom_encoder = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
+                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
+                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+                                         d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
+        self.fn_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
 
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
@@ -62,7 +67,8 @@ class Parser(Module):
     def train(self, mode: bool = True) -> None:
         self.atom_embedder.train(mode)
         self.atom_decoder.train(mode)
-        self.negative_transformation.train(mode)
+        self.fn_transformation.train(mode)
+        self.atom_encoder.train(mode)
         self.dropout.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
@@ -111,7 +117,7 @@ class Parser(Module):
         s_out = atom_reprs.shape[1]
         if s_out == 0:
             return atom_reprs
-        return self.atom_decoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
+        return self.atom_encoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
 
     def decode_train(self, lexical_token_ids: LongTensor, symbol_ids: LongTensor) \
             -> Tuple[Tensor, Tensor, Tensor, LongTensor]:
@@ -159,7 +165,7 @@ class Parser(Module):
                for shape in distinct_shapes]
 
         for this_shape_positives, this_shape_negatives in zip(all_shape_positives, all_shape_negatives):
-            this_shape_negatives = self.negative_transformation(this_shape_negatives)
+            this_shape_positives = self.fn_transformation(this_shape_positives)
             weights = torch.bmm(this_shape_positives,
                                 this_shape_negatives.transpose(2, 1))
             matches.append(self.sinkhorn(weights, iters=sinkhorn_iters))
@@ -185,7 +191,7 @@ class Parser(Module):
             sent = list(zip(*sent))
             local = []
             for pos, neg in sent:
-                weights = self.dropout(pos) @ self.negative_transformation(self.dropout(neg)).transpose(-1, -2)
+                weights = self.fn_transformation(self.dropout(pos)) @ self.dropout(neg).transpose(-1, -2)
                 local.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ret.append(local)
         return ret
