@@ -140,7 +140,7 @@ def make_atom_mapping(samples: List[Sample]) -> Mapping[str, int]:
 
 
 def tensorize_matrix(matrix: Matrix) -> LongTensor:
-    return LongTensor(matrix).argmax(dim=1)
+    return LongTensor(matrix).argmax(dim=-1)
 
 
 def measure_linking_accuracy(pred: List[Tensor], truth: List[LongTensor]) -> Tuple[int, int]:

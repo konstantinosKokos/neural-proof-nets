@@ -97,7 +97,7 @@ def convert_matches_to_matrix(matches: Tuple[ints, ints], proof: ProofNet) -> Ma
     def is_match(_i: int, _j: int) -> bool:
         return (_i, _j) in proof
 
-    return [[is_match(i, j) for i in matches[0]] for j in matches[1]]
+    return [[is_match(i, j) for j in matches[1]] for i in matches[0]]
 
 
 def index_from_polish(polished: List[str], offset: int) -> Dict[int, int]:
