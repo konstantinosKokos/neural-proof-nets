@@ -119,24 +119,6 @@ class Parser(Module):
             return atom_reprs
         return self.atom_encoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
 
-    def decode_train(self, lexical_token_ids: LongTensor, symbol_ids: LongTensor) \
-            -> Tuple[Tensor, Tensor, Tensor, LongTensor]:
-
-        b, s_in = lexical_token_ids.shape
-        s_out = symbol_ids.shape[1]
-
-        encoder_mask = self.make_word_mask(lexical_token_ids)
-        encoder_output = self.dropout(self.encode_words(lexical_token_ids, encoder_mask))
-
-        decoder_mask = self.make_decoder_mask(b=b, n=s_out)
-        atom_embeddings = self.atom_embedder(symbol_ids.to(self.device))
-
-        extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
-
-        output_reprs = self.atom_decoder((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
-
-        return output_reprs, encoder_output, atom_embeddings, extended_encoder_mask
-
     def link(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
              pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], exclude_singular: bool = True,
              sinkhorn_iters: int = 3) \
@@ -195,6 +177,24 @@ class Parser(Module):
                 local.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ret.append(local)
         return ret
+
+    def decode_train(self, lexical_token_ids: LongTensor, symbol_ids: LongTensor) \
+            -> Tuple[Tensor, Tensor, Tensor, LongTensor]:
+
+        b, s_in = lexical_token_ids.shape
+        s_out = symbol_ids.shape[1]
+
+        encoder_mask = self.make_word_mask(lexical_token_ids)
+        encoder_output = self.dropout(self.encode_words(lexical_token_ids, encoder_mask))
+
+        decoder_mask = self.make_decoder_mask(b=b, n=s_out)
+        atom_embeddings = self.atom_embedder(symbol_ids.to(self.device))
+
+        extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
+
+        output_reprs = self.atom_decoder((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
+
+        return output_reprs, encoder_output, atom_embeddings, extended_encoder_mask
 
     def decode_greedy(self, lexical_token_ids: LongTensor, max_decode_length: Optional[int] = None,
                       length_factor: int = 5) -> Tuple[LongTensor, Tensor, Tensor, LongTensor, Tensor]:
@@ -350,7 +350,7 @@ class Parser(Module):
             link_loss = 0
         else:
             # axiom linking
-            link_weights = self.link_train(output_reprs, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
+            link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
             link_loss = sum((
                 functional.nll_loss(link, perm, reduction='sum') / (link.shape[0] * link.shape[1])
