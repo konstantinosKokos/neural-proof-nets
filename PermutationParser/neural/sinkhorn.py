@@ -16,13 +16,11 @@ def sinkhorn_step(x: Tensor) -> Tensor:
 
 
 def sinkhorn_fn(x: Tensor, tau: float, iters: int, eps: float = 1e-20) -> Tensor:
-    x = x / tau
-    for _ in range(iters):
-        x = sinkhorn_step(x)
+    x = sinkhorn_fn_no_exp(x, tau, iters)
     return torch.exp(x) + eps
 
 
-def sinkhorn_fn_no_exp(x: Tensor, tau: float, iters: int, eps: float = 1e-20) -> Tensor:
+def sinkhorn_fn_no_exp(x: Tensor, tau: float, iters: int) -> Tensor:
     x = x / tau
     for _ in range(iters):
         x = sinkhorn_step(x)
