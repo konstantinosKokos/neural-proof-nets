@@ -146,7 +146,7 @@ def tensorize_matrix(matrix: Matrix) -> LongTensor:
 def measure_linking_accuracy(pred: List[Tensor], truth: List[LongTensor]) -> Tuple[int, int]:
     def measure_one(pred_one: Tensor, truth_one: LongTensor) -> Tuple[int, int]:
         b, n = pred_one.shape[0:2]
-        return torch.sum(pred_one.argmax(dim=1) == truth_one).item(), b * n
+        return torch.sum(pred_one.argmax(dim=-1) == truth_one).item(), b * n
 
     measurements = list(map(measure_one, pred, truth))
     correct, total = list(zip(*measurements))

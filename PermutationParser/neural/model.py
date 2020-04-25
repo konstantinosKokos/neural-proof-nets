@@ -353,7 +353,8 @@ class Parser(Module):
             link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
             link_loss = sum((
-                functional.nll_loss(link, perm, reduction='sum') / (link.shape[0] * link.shape[1])
+                functional.nll_loss(link.flatten(0, 1), perm.flatten(0, 1), reduction='sum')
+                / (link.shape[0] * link.shape[1])
                 for link, perm in zip(link_weights, grouped_permutors)
             )) * linking_weight
             mutual_loss = link_loss + supertagging_loss
