@@ -75,6 +75,25 @@ def make_linear_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, 
     return schedule
 
 
+def make_geom_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, restart_every: int,
+                                            ratio: float = 2) -> Callable[[int], float]:
+    linear_factor = max_lr / warmup_steps
+
+    def schedule(step: int) -> float:
+        if step < warmup_steps:
+            return linear_factor * step
+        else:
+            current_restart = (step - warmup_steps) // restart_every
+            outer_factor = max_lr / ratio**(current_restart-1)
+            offset = warmup_steps + current_restart * restart_every
+            inner_cos_fn = make_cosine_window(max_lr=outer_factor,
+                                              offset=offset,
+                                              decay_over=restart_every)
+
+            return inner_cos_fn(step)
+    return schedule
+
+
 def linear_envelope(max_lr: float, offset: int, decay_over: int) -> Callable[[int], float]:
     def schedule(step):
         return (decay_over - step) * max_lr / (decay_over - offset)
