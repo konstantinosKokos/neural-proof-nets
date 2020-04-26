@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import BertModel
 
-from PermutationParser.neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
+from PermutationParser.neural.sinkhorn import sinkhorn_fn as sinkhorn
 from PermutationParser.neural.utils import *
 from PermutationParser.neural.embedding import ComplexEmbedding
 from PermutationParser.parsing.utils import TypeParser, Analysis
@@ -52,8 +52,8 @@ class Parser(Module):
         raise NotImplementedError('Forward not implemented.')
 
     @staticmethod
-    def sinkhorn(x: Tensor, iters: int, tau: int = 1, eps: float = 1e-18) -> Tensor:
-        return sinkhorn(x, tau=tau, iters=iters, eps=eps)
+    def sinkhorn(x: Tensor, iters: int, tau: int = 1) -> Tensor:
+        return sinkhorn(x, tau=tau, iters=iters)
 
     def freeze_encoder(self) -> None:
         for param in self.word_encoder.parameters():
@@ -154,7 +154,7 @@ class Parser(Module):
         return matches
 
     def link_train(self, *args, **kwargs) -> List[Tensor]:
-        return self.link(*args, **kwargs, sinkhorn_iters=3)
+        return self.link(*args, **kwargs, sinkhorn_iters=5)
 
     def link_eval(self, *args, **kwargs) -> List[Tensor]:
         return self.link(*args, **kwargs, sinkhorn_iters=10)
@@ -352,12 +352,13 @@ class Parser(Module):
             # axiom linking
             link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
+            grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
+                                 for link, perm in zip(link_weights, grouped_permutors)]
             link_loss = sum((
-                functional.nll_loss(link.flatten(0, 1), perm.flatten(0, 1), reduction='sum')
-                / (link.shape[0] * link.shape[1])
+                functional.binary_cross_entropy(link, perm, reduction='mean')
                 for link, perm in zip(link_weights, grouped_permutors)
-            )) * linking_weight
-            mutual_loss = link_loss + supertagging_loss
+            ))
+            mutual_loss = link_loss * linking_weight + supertagging_loss
             mutual_loss.backward()
 
         optimizer.step()
