@@ -75,25 +75,6 @@ def make_linear_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, 
     return schedule
 
 
-def make_geom_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, restart_every: int,
-                                            ratio: float = 2) -> Callable[[int], float]:
-    linear_factor = max_lr / warmup_steps
-
-    def schedule(step: int) -> float:
-        if step < warmup_steps:
-            return linear_factor * step
-        else:
-            current_restart = (step - warmup_steps) // restart_every
-            outer_factor = max_lr / ratio**(current_restart-1)
-            offset = warmup_steps + current_restart * restart_every
-            inner_cos_fn = make_cosine_window(max_lr=outer_factor,
-                                              offset=offset,
-                                              decay_over=restart_every)
-
-            return inner_cos_fn(step)
-    return schedule
-
-
 def linear_envelope(max_lr: float, offset: int, decay_over: int) -> Callable[[int], float]:
     def schedule(step):
         return (decay_over - step) * max_lr / (decay_over - offset)
@@ -137,35 +118,9 @@ def make_dataloader(samples: List[Sample], batch_size: int = 128, shuffle: bool 
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=lambda x: x)
 
 
-def get_max_len(epoch: int) -> int:
-    """
-        Returns maximum output size as a function of epoch.
-    """
-    grace_period = 0
-    min_len = 20
-    increase_every = 20
-    increase_by = 10
-    max_len = 80
-    if epoch < grace_period:
-        return min_len
-    return min(increase_by * ((epoch - grace_period) // increase_every) + min_len, max_len)
-
-
 def get_nbatches(epoch_len: int, trainset: List[Sample], batch_size: int) -> int:
     """
         Returns number of batches as a function of epoch.
     """
     dataset_size = len([sample for sample in trainset if len(sample.polish) <= epoch_len])
     return ceil(dataset_size / batch_size)
-
-
-def lens_to_schedule(batch_lens: Sequence[int], max_lr: float = 5e-04) -> Callable[[int], float]:
-    warmup_epoch = list(filter(lambda i: batch_lens[i] != min(batch_lens), range(len(batch_lens))))[0]
-    warmup_steps = sum(batch_lens[:warmup_epoch])
-    decay_over = sum(batch_lens) - warmup_steps
-    return make_cosine_schedule(max_lr=max_lr, warmup_steps=warmup_steps, decay_over=decay_over)
-
-
-def make_link_weighter(batch_lens: Sequence[int]) -> Callable[[int], float]:
-    reach_max_at = list(filter(lambda i: batch_lens[i] == max(batch_lens), range(len(batch_lens))))[0]
-    return lambda epoch: min(0.5, max(0, (epoch - reach_max_at) / 2 * reach_max_at * 0.5))
