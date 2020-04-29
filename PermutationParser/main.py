@@ -9,11 +9,9 @@ import subprocess
 import os
 import sys
 
-num_epochs = 1000
+num_epochs = 205
 warmup_epochs = 5
-restart_epochs = 100
-max_lr = 1e-04
-linking_weight = 1
+max_lr = 1e-3
 
 
 def logprint(x: str, ostream: Any) -> None:
@@ -32,8 +30,8 @@ def load_model(parser: Parser, load: str, **kwargs) -> Tuple[int, Dict, int]:
     return step_num, opt_state_dict, epoch
 
 
-def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 32,
-         val_batch: int = 256, device: str = 'cuda', version: Optional[str] = None,
+def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 32,
+         val_batch: int = 512, device: str = 'cuda', version: Optional[str] = None,
          save_to_dir: Optional[str] = None) \
         -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     if version is None:
@@ -60,28 +58,21 @@ def init(datapath: Optional[str] = None, max_len: int = 95, train_batch: int = 3
     return train_dl, dev_dl, test_dl, nbatches, parser, version
 
 
-def init_pere(datapath: str, save_to_dir: str) -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
-    return init(datapath, 95, 256, 512, 'cuda', version='pere', save_to_dir=save_to_dir)
-
-
-def train(model_path: Optional[str] = None, data_path: Optional[str] = None, pere: bool = False,
+def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
           version: Optional[str] = None, save_to_dir: Optional[str] = None):
 
-    if pere:
-        train_dl, val_dl, test_dl, nbatches, parser, version = init_pere(data_path, save_to_dir)
-    else:
-        train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
+    train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
 
-    schedule = make_linear_schedule_with_cosine_restarts(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
-                                                         restart_every=restart_epochs * nbatches,
-                                                         decay_over=num_epochs * nbatches)
+    schedule = make_cosine_schedule(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
+                                    decay_over=200 * nbatches)
 
     param_groups, grad_scales = list(zip(*[({'params': parser.word_encoder.parameters()}, 0.1),
+                                           ({'params': parser.linker.parameters()}, 1),
                                            ({'params': parser.atom_embedder.parameters()}, 1),
-                                           ({'params': parser.atom_decoder.parameters()}, 1),
-                                           ({'params': parser.negative_transformation.parameters()}, 1)]))
+                                           ({'params': parser.supertagger.parameters()}, 1),
+                                           ({'params': parser.fn_transformation.parameters()}, 1)]))
 
-    _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
+    _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-06)
     opt = Scheduler(_opt, schedule, grad_scales)
     fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1)
 
@@ -99,9 +90,10 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None, per
     log = []
     for e in range(init_epoch, num_epochs):
         # epoch settings
-        validate = True if e % 20 == 0 and e != 0 else False
-        save = True if e % 20 == 0 and e != 0 else True if e == num_epochs - 1 else False
+        validate = True if e == 4 or (e % 20 == 0 and e != 0) else False
+        save = True if e == 4 or (e % 20 == 0 and e != 0) else True if e == num_epochs - 1 else False
         epoch_lr = opt.lr
+        linking_weight = 0 if e < 5 else 1
 
         with open(f'{save_to_dir}/{version}/log.txt', 'a') as stream:
             logprint('=' * 64, stream)

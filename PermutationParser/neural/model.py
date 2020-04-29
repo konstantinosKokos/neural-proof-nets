@@ -12,7 +12,7 @@ from PermutationParser.neural.sinkhorn import sinkhorn_fn as sinkhorn
 from PermutationParser.neural.utils import *
 from PermutationParser.neural.embedding import ComplexEmbedding
 from PermutationParser.parsing.utils import TypeParser, Analysis
-from PermutationParser.neural.transformer import make_decoder, FFN
+from PermutationParser.neural.transformer import make_decoder, FFN, make_bicoder
 
 
 class Parser(Module):
@@ -35,17 +35,25 @@ class Parser(Module):
         self.unfrozen_blocks = set(range(12))
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.atom_decoder = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
-                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
-                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
-                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
-                                         d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
+        self.supertagger = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+                                        d_encoder=self.enc_dim, d_decoder=self.dec_dim,
+                                        d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
+                                        d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+                                        d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.atom_embedder = ComplexEmbedding(self.num_embeddings, dec_dim//2).to(device)
-        self.atom_encoder = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
-                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
-                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
-                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
-                                         d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
+        # self.linker = make_encoder(num_layers=4, num_heads=self.dec_heads, d_model=self.dec_dim,
+        #                            d_intermediate=2 * self.dec_dim, d_k=self.dec_dim//2,
+        #                            d_v=self.dec_dim//self.dec_heads).to(device)
+        self.linker = make_bicoder(num_layers=3, num_heads_guide=self.enc_heads, num_heads_self=self.dec_heads,
+                                   d_guide=self.enc_dim, d_self=self.dec_dim,
+                                   d_atn_guide=self.enc_dim//self.enc_heads, d_atn_self=self.dec_dim//2,
+                                   d_v_guide=self.enc_dim//self.enc_heads, d_v_self=self.dec_dim//self.dec_heads,
+                                   d_interm=2 * self.dec_dim, dropout_rate=0.1).to(device)
+        # self.linker = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        #                            d_encoder=self.enc_dim, d_decoder=self.dec_dim,
+        #                            d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
+        #                            d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+        #                            d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.fn_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
 
     def forward(self, *args) -> NoReturn:
@@ -66,9 +74,9 @@ class Parser(Module):
 
     def train(self, mode: bool = True) -> None:
         self.atom_embedder.train(mode)
-        self.atom_decoder.train(mode)
+        self.supertagger.train(mode)
         self.fn_transformation.train(mode)
-        self.atom_encoder.train(mode)
+        self.linker.train(mode)
         self.dropout.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
@@ -117,7 +125,8 @@ class Parser(Module):
         s_out = atom_reprs.shape[1]
         if s_out == 0:
             return atom_reprs
-        return self.atom_encoder((word_reprs, word_mask, atom_reprs, atom_mask))[2]
+        return self.linker((self.dropout(word_reprs), word_mask, atom_reprs, atom_mask))[2]
+        # return self.linker((atom_reprs, atom_mask))[0]
 
     def link(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
              pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], exclude_singular: bool = True,
@@ -192,7 +201,7 @@ class Parser(Module):
 
         extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
 
-        output_reprs = self.atom_decoder((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
+        output_reprs = self.supertagger((encoder_output, extended_encoder_mask, atom_embeddings, decoder_mask))[2]
 
         return output_reprs, encoder_output, atom_embeddings, extended_encoder_mask
 
@@ -219,7 +228,7 @@ class Parser(Module):
         for t in range(s_out):
             _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                     decoder_input, decoder_mask[:, :t + 1, :t + 1])
-            repr_t = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
+            repr_t = self.supertagger(_decoder_tuple_input)[2][:, -1]
             prob_t = self.predict_atoms(repr_t, t+1)
             class_t = prob_t.argmax(dim=-1)
             output_symbols = torch.cat([output_symbols, class_t.unsqueeze(1)], dim=1)
@@ -273,7 +282,7 @@ class Parser(Module):
             for beam in range(beam_width):
                 _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                         decoder_input[:, beam], decoder_mask[:, :t + 1, :t + 1])
-                repr_t[:, beam] = self.atom_decoder(_decoder_tuple_input)[2][:, -1]
+                repr_t[:, beam] = self.supertagger(_decoder_tuple_input)[2][:, -1]
 
             logprobs_t = self.predict_atoms(repr_t, t+1).log_softmax(dim=-1)
 
