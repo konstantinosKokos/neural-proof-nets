@@ -76,9 +76,16 @@ def make_linear_schedule_with_cosine_restarts(max_lr: float, warmup_steps: int, 
 
 
 def linear_envelope(max_lr: float, offset: int, decay_over: int) -> Callable[[int], float]:
-    def schedule(step):
+    def schedule(step: int) -> float:
         return (decay_over - step) * max_lr / (decay_over - offset)
     return schedule
+
+
+def make_noam_scheme(d_model: int, warmup_steps: int, factor: float) -> Callable[[int], float]:
+    def noam_scheme(step: int) -> float:
+        step += 1
+        return d_model**-0.5 * min(step**-0.5, step*warmup_steps**-1.5) * factor
+    return noam_scheme
 
 
 class Scheduler(object):
