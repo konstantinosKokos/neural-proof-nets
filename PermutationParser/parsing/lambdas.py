@@ -18,6 +18,10 @@ def translate_decoration(decoration: str) -> str:
     return decoration.lower().translate(SUP)
 
 
+def nodecorate(*args) -> str:
+    return ''
+
+
 def translate_type(wordtype: WordType) -> str:
     return str(wordtype).upper().translate(TYPES)
 
@@ -124,7 +128,11 @@ def get_decoration(functor: FunctorType):
 
 
 def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: StrMapping, upward: bool,
-             varcount: int) -> Tuple[str, int]:
+             varcount: int, add_dependencies: bool = True) -> Tuple[str, int]:
+    if add_dependencies:
+        decorate = translate_decoration
+    else:
+        decorate = nodecorate
     node = graph.get_node(idx)
     if upward:
         # leaf case, cross to input
@@ -151,9 +159,9 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
                     ret2, varcount = traverse(graph, graph.to_output(node).idx, forward_dict,
                                               backward_dict, not upward, varcount)
                     if node.decoration in {'mod', 'app', 'predm', 'det'}:
-                        return f'{ret}{translate_decoration(node.decoration)} {ret2})', varcount
+                        return f'{ret}{decorate(node.decoration)} {ret2})', varcount
                     else:
-                        return f'{ret} {ret2}{translate_decoration(node.decoration)})', varcount
+                        return f'{ret} {ret2}{decorate(node.decoration)})', varcount
                 else:
                     raise NotImplementedError
         else:
@@ -171,8 +179,8 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
                 ret3, varcount = traverse(graph, graph.to_output(node).idx, forward_dict,
                                           backward_dict, not upward, varcount)
                 if node.decoration in {'mod', 'app', 'predm', 'det'}:
-                    ret2 += translate_decoration(node.decoration)
+                    ret2 += decorate(node.decoration)
                 else:
-                    ret3 += translate_decoration(node.decoration)
+                    ret3 += decorate(node.decoration)
                 return f'({ret2} {ret3})', varcount
 
