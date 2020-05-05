@@ -94,7 +94,8 @@ class Analysis:
 class TypeParser(object):
     def __init__(self, atom_tokenizer: AtomTokenizer):
         self.operators = {k for k in atom_tokenizer.atom_map.keys() if k.lower() == k and k != '_'}
-        self.operator_classes = {k: BoxType if k in ModDeps else DiamondType for k in self.operators if k != '→'}
+        self.operator_classes = {k: BoxType if k in ModDeps.union({'det'}) else DiamondType
+                                 for k in self.operators if k != '→'}
         self.operator_classes['→'] = FunctorType
 
     def analyze_beam_batch(self, sents: strs, polishes: List[List[Optional[List[strs]]]]) \
