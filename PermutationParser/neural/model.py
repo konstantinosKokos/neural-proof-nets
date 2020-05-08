@@ -2,17 +2,17 @@ from itertools import chain
 from typing import *
 
 import torch
-from torch.nn import Module, functional, Parameter, Linear
+from torch.nn import functional, LayerNorm, Sequential
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import BertModel
 
-from PermutationParser.neural.sinkhorn import sinkhorn_fn as sinkhorn
+from PermutationParser.neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
 from PermutationParser.neural.utils import *
 from PermutationParser.neural.embedding import ComplexEmbedding
 from PermutationParser.parsing.utils import TypeParser, Analysis
-from PermutationParser.neural.transformer import make_decoder, FFN, make_bicoder
+from PermutationParser.neural.transformer import make_decoder, FFN
 
 
 class Parser(Module):
@@ -27,34 +27,33 @@ class Parser(Module):
         self.type_parser = TypeParser(atokenizer)
         self.tokenizer = tokenizer
         self.dropout = Dropout(0.1)
-        self.enc_heads = 8
-        self.dec_heads = 8
+        self.enc_heads = 12
+        self.dec_heads = 12
+        self.d_atn_dec = 64
 
         self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
+        self.supertagger = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+                                        d_encoder=self.enc_dim, d_decoder=self.dec_dim,
+                                        d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
+                                        d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+                                        d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
+        self.atom_embedder = ComplexEmbedding(self.num_embeddings, self.dec_dim//2).to(device)
+        self.linker = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+                                   d_encoder=self.enc_dim, d_decoder=self.dec_dim,
+                                   d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
+                                   d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
+                                   d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
+        self.pos_transformation = Sequential(
+            FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim, d_out=32),
+            LayerNorm(32)).to(device)
+        self.neg_transformation = Sequential(
+            FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim, d_out=32),
+            LayerNorm(32)).to(device)
+
         self.freeze_encoder()
         self.unfrozen_blocks = set(range(12))
         for block in self.unfrozen_blocks:
             self.unfreeze_encoder_block(block)
-        self.supertagger = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
-                                        d_encoder=self.enc_dim, d_decoder=self.dec_dim,
-                                        d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
-                                        d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
-                                        d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
-        self.atom_embedder = ComplexEmbedding(self.num_embeddings, dec_dim//2).to(device)
-        # self.linker = make_encoder(num_layers=4, num_heads=self.dec_heads, d_model=self.dec_dim,
-        #                            d_intermediate=2 * self.dec_dim, d_k=self.dec_dim//2,
-        #                            d_v=self.dec_dim//self.dec_heads).to(device)
-        self.linker = make_bicoder(num_layers=3, num_heads_guide=self.enc_heads, num_heads_self=self.dec_heads,
-                                   d_guide=self.enc_dim, d_self=self.dec_dim,
-                                   d_atn_guide=self.enc_dim//self.enc_heads, d_atn_self=self.dec_dim//2,
-                                   d_v_guide=self.enc_dim//self.enc_heads, d_v_self=self.dec_dim//self.dec_heads,
-                                   d_interm=2 * self.dec_dim, dropout_rate=0.1).to(device)
-        # self.linker = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
-        #                            d_encoder=self.enc_dim, d_decoder=self.dec_dim,
-        #                            d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.dec_dim//2,
-        #                            d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
-        #                            d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
-        self.fn_transformation = FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim).to(device)
 
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
@@ -75,9 +74,10 @@ class Parser(Module):
     def train(self, mode: bool = True) -> None:
         self.atom_embedder.train(mode)
         self.supertagger.train(mode)
-        self.fn_transformation.train(mode)
         self.linker.train(mode)
         self.dropout.train(mode)
+        self.pos_transformation.train(mode)
+        self.neg_transformation.train(mode)
         for block in self.unfrozen_blocks:
             dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
 
@@ -86,7 +86,7 @@ class Parser(Module):
 
     def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = torch.FloatTensor) -> 'Parser':
         self.device = self.device if device is None else device
-        return self.to(device=device, dtype=dtype)
+        return super(Parser, self).to(device=device, dtype=dtype)
 
     def make_mask(self, inps: LongTensor, padding_id: int) -> LongTensor:
         mask = torch.ones_like(inps)
@@ -156,7 +156,8 @@ class Parser(Module):
                for shape in distinct_shapes]
 
         for this_shape_positives, this_shape_negatives in zip(all_shape_positives, all_shape_negatives):
-            this_shape_positives = self.fn_transformation(this_shape_positives)
+            this_shape_positives = self.pos_transformation(this_shape_positives)
+            this_shape_negatives = self.neg_transformation(this_shape_negatives)
             weights = torch.bmm(this_shape_positives,
                                 this_shape_negatives.transpose(2, 1))
             matches.append(self.sinkhorn(weights, iters=sinkhorn_iters))
@@ -166,7 +167,7 @@ class Parser(Module):
         return self.link(*args, **kwargs, sinkhorn_iters=5)
 
     def link_eval(self, *args, **kwargs) -> List[Tensor]:
-        return self.link(*args, **kwargs, sinkhorn_iters=10)
+        return self.link(*args, **kwargs, sinkhorn_iters=5)
 
     def link_slow(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
                   pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], sinkhorn_iters: int = 10)\
@@ -182,7 +183,9 @@ class Parser(Module):
             sent = list(zip(*sent))
             local = []
             for pos, neg in sent:
-                weights = self.fn_transformation(self.dropout(pos)) @ self.dropout(neg).transpose(-1, -2)
+                pos = self.pos_transformation(self.dropout(pos))
+                neg = self.neg_transformation(self.dropout(neg))
+                weights = pos @ neg.transpose(-1, -2)
                 local.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ret.append(local)
         return ret
@@ -273,7 +276,7 @@ class Parser(Module):
         output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long).to(self.device)
         beam_scores = torch.zeros(b, beam_width, device=self.device)
 
-        _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer) + 1, device=self.device) * -1e03
+        _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer), device=self.device) * -1e03
         _masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
 
         for t in range(s_out):
@@ -341,11 +344,11 @@ class Parser(Module):
         return (output_symbols, decoder_input, encoder_output, extended_encoder_mask,
                 decoder_output.view(b, beam_width, -1, self.dec_dim))
 
-    def train_batch(self, samples: List[Sample], loss_fn: Module, optimizer: Optimizer, max_difficulty: int = 20,
+    def train_batch(self, batch: Batch, loss_fn: Module, optimizer: Optimizer,
                     linking_weight: float = 0.5) -> Tuple[float, float]:
         self.train()
 
-        words, types, pos_idxes, neg_idxes = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
+        words, types, pos_idxes, neg_idxes, grouped_permutors = batch
         atom_mask = self.make_atom_mask(types)
 
         output_reprs, encoder_output, atom_embeddings, word_mask = self.decode_train(words, types)
@@ -360,11 +363,12 @@ class Parser(Module):
         else:
             # axiom linking
             link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
-            grouped_permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty)]
-            grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
-                                 for link, perm in zip(link_weights, grouped_permutors)]
+            grouped_permutors = [perm.to(self.device) for perm in grouped_permutors]
+            # grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
+            #                      for link, perm in zip(link_weights, grouped_permutors)]
             link_loss = sum((
-                functional.binary_cross_entropy(link, perm, reduction='mean')
+                # functional.binary_cross_entropy(link, perm, reduction='mean')
+                functional.nll_loss(link.flatten(0, 1), perm.flatten(), reduction='mean')
                 for link, perm in zip(link_weights, grouped_permutors)
             ))
             mutual_loss = link_loss * linking_weight + supertagging_loss
@@ -375,23 +379,18 @@ class Parser(Module):
         return supertagging_loss.item(), (link_loss.item() if link_loss != 0 else 0)
 
     @torch.no_grad()
-    def eval_batch(self, samples: List[Sample], oracle: bool = False, link: bool = True) \
+    def eval_batch(self, batch: Batch, link: bool = True) \
             -> Tuple[Tuple[int, int], Tuple[Tuple[int, int], Tuple[int, int]]]:
         self.eval()
 
-        words, types, pos_idxes, neg_idxes = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
+        words, types, pos_idxes, neg_idxes, grouped_permutors = batch
         atom_mask = self.make_atom_mask(types)
 
-        if oracle:
-            temp = self.decode_train(words, types)
-            output_reprs, encoder_output, atom_embeddings, wmask = temp
-            type_predictions = self.predict_atoms(output_reprs[:, :-1], 1).argmax(dim=-1)
-        else:
-            max_length = types.shape[1]
-            temp = self.decode_greedy(words, max_decode_length=max_length)
-            type_predictions, atom_embeddings, encoder_output, wmask, _ = temp
-            type_predictions = type_predictions[:, 1:-1]
-            atom_embeddings = atom_embeddings[:, :-1]
+        max_length = types.shape[1]
+        temp = self.decode_greedy(words, max_decode_length=max_length)
+        type_predictions, atom_embeddings, encoder_output, wmask, _ = temp
+        type_predictions = type_predictions[:, 1:-1]
+        atom_embeddings = atom_embeddings[:, :-1]
 
         # supertagging
         types = types[:, 1:].to(self.device)
@@ -399,8 +398,7 @@ class Parser(Module):
         if link:
             # linking
             links = self.link_eval(atom_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
-            permutors = [perm.to(self.device) for perm in make_permutors(samples, max_difficulty=20,
-                                                                         exclude_singular=False)]
+            permutors = [perm.to(self.device) for perm in grouped_permutors]
 
             return (measure_linking_accuracy(links, permutors),
                     measure_supertagging_accuracy(type_predictions, types))
@@ -410,17 +408,17 @@ class Parser(Module):
                     linking_weight: float = 0.5) -> Tuple[float, float]:
 
         total_l1, total_l2 = 0, 0
-        for samples in tqdm(dataloader):
-            l1, l2 = self.train_batch(samples, loss_fn, optimizer, linking_weight=linking_weight)
+        for batch in tqdm(dataloader):
+            l1, l2 = self.train_batch(batch, loss_fn, optimizer, linking_weight=linking_weight)
             total_l1 += l1
             total_l2 += l2
         return total_l1 / len(dataloader), total_l2 / len(dataloader)
 
-    def eval_epoch(self, dataloader: DataLoader, oracle: bool = False, link: bool = True) -> Tuple[float, float, float]:
+    def eval_epoch(self, dataloader: DataLoader, link: bool = True) -> Tuple[float, float, float]:
         l_total, l_correct, s_total, s_correct, w_total, w_correct = (0.1,) * 6
 
-        for samples in tqdm(dataloader):
-            batch_output = self.eval_batch(samples, oracle, link)
+        for batch in tqdm(dataloader):
+            batch_output = self.eval_batch(batch, link)
             (bl_correct, bl_total), ((bs_correct, bs_total), (bw_correct, bw_total)) = batch_output
             s_total += bs_total
             s_correct += bs_correct

@@ -9,14 +9,14 @@ import subprocess
 import os
 import sys
 
-num_epochs = 205
+num_epochs = 505
 warmup_epochs = 5
-max_lr = 1e-3
 
 
-def logprint(x: str, ostream: Any) -> None:
+def logprint(x: str, ostreams: List[Any]) -> None:
     print(x)
-    ostream.write(x + '\n')
+    for ostream in ostreams:
+        ostream.write(x + '\n')
     sys.stdout.flush()
 
 
@@ -43,17 +43,27 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
     print(f'Version id:\t{version}')
 
     # load data and model
-    trainset, devset, testset = load_stored() if datapath is None else load_stored(datapath)
+    _trainset, _devset, _testset = load_stored() if datapath is None else load_stored(datapath)
 
-    devset = sorted(devset, key=lambda sample: len(sample.polish))
-    testset = sorted(testset, key=lambda sample: len(sample.polish))
+    atokenizer = AtomTokenizer(_trainset+_devset+_testset)
+    tokenizer = Tokenizer()
 
-    train_dl = make_dataloader([sample for sample in trainset if len(sample.polish) <= max_len], train_batch)
-    dev_dl = make_dataloader([sample for sample in devset if len(sample.polish) <= max_len], val_batch, shuffle=False)
-    test_dl = make_dataloader(testset, val_batch, shuffle=False)
-    nbatches = get_nbatches(max_len, trainset, train_batch)
+    print('Making dataloaders.')
+    trainset, devset, testset = list(map(lambda dset: list(filter(lambda sample: len(sample.polish) <= max_len, dset)),
+                                         [_trainset, _devset, _testset]))
+    nbatches = get_nbatches(trainset, train_batch)
+    trainset = [vectorize_sample(s, atokenizer, tokenizer) for s in trainset]
+    devset = [vectorize_sample(s, atokenizer, tokenizer) for s in sorted(devset, key=lambda x: len(x.polish))]
+    testset = [vectorize_sample(s, atokenizer, tokenizer) for s in sorted(testset, key=lambda x: len(x.polish))]
+
+    train_dl = make_dataloader(trainset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, True,
+                               train_batch, True)
+    dev_dl = make_dataloader(devset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, False, val_batch, False)
+    test_dl = make_dataloader(testset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, False,
+                              val_batch, False)
+
     print('Read data.')
-    parser = Parser(AtomTokenizer(trainset + devset + testset), Tokenizer(), 768, 128, device)
+    parser = Parser(atokenizer, tokenizer, device=device)
     print('Initialized model.')
     return train_dl, dev_dl, test_dl, nbatches, parser, version
 
@@ -63,16 +73,16 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
 
     train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
 
-    schedule = make_cosine_schedule(max_lr=max_lr, warmup_steps=warmup_epochs * nbatches,
-                                    decay_over=200 * nbatches)
-
-    param_groups, grad_scales = list(zip(*[({'params': parser.word_encoder.parameters()}, 0.1),
+    schedule = make_noam_scheme(d_model=parser.dec_dim, warmup_steps=warmup_epochs * nbatches, factor=1.)
+    param_groups, grad_scales = list(zip(*[({'params': parser.word_encoder.parameters(),
+                                             'weight_decay': 0}, 0.1),
+                                           ({'params': parser.pos_transformation.parameters()}, 1),
+                                           ({'params': parser.neg_transformation.parameters()}, 1),
                                            ({'params': parser.linker.parameters()}, 1),
                                            ({'params': parser.atom_embedder.parameters()}, 1),
-                                           ({'params': parser.supertagger.parameters()}, 1),
-                                           ({'params': parser.fn_transformation.parameters()}, 1)]))
+                                           ({'params': parser.supertagger.parameters()}, 1)]))
 
-    _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-06)
+    _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
     opt = Scheduler(_opt, schedule, grad_scales)
     fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1)
 
@@ -91,26 +101,27 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
     for e in range(init_epoch, num_epochs):
         # epoch settings
         validate = True if e == 4 or (e % 20 == 0 and e != 0) else False
-        save = True if e == 4 or (e % 20 == 0 and e != 0) else True if e == num_epochs - 1 else False
+        save = True if e == 4 or (e % 10 == 0 and e != 0) else True if e == num_epochs - 1 else False
         epoch_lr = opt.lr
-        linking_weight = 0 if e < 5 else 1
+        linking_weight = 1  # 0 if e < 5 else 1
 
         with open(f'{save_to_dir}/{version}/log.txt', 'a') as stream:
-            logprint('=' * 64, stream)
-            logprint(f'Epoch {e}', stream)
-            logprint(' ' * 50 + f'LR: {epoch_lr}', stream)
-            logprint(' ' * 50 + f'LW: {linking_weight}', stream)
-            logprint('-' * 64, stream)
+            logprint('=' * 64, [stream])
+            logprint(f'Epoch {e}', [stream])
+            logprint(' ' * 50 + f'LR: {epoch_lr}', [stream])
+            logprint(' ' * 50 + f'LW: {linking_weight}', [stream])
+            logprint('-' * 64, [stream])
             supertagging_loss, linking_loss = parser.train_epoch(train_dl, fuzzy_loss, opt, linking_weight)
-            logprint(f' Supertagging Loss:\t\t{supertagging_loss:5.2f}', stream)
-            logprint(f' Linking Loss:\t\t\t{linking_loss:5.2f}', stream)
+            logprint(f' Supertagging Loss:\t\t{supertagging_loss:5.2f}', [stream])
+            logprint(f' Linking Loss:\t\t\t{linking_loss:5.2f}', [stream])
             if validate:
-                logprint('-' * 64, stream)
-                sentence_ac, atom_ac, link_ac = parser.eval_epoch(val_dl, oracle=False, link=linking_weight != 0)
-                logprint(f' Sentence Accuracy:\t\t{(sentence_ac * 100):6.2f}', stream)
-                logprint(f' Atom Accuracy:\t\t\t{(atom_ac * 100):6.2f}', stream)
-                logprint(f' Link Accuracy:\t\t\t{(link_ac * 100):6.2f}', stream)
-            logprint('\n', stream)
+                with open(f'{save_to_dir}/{version}/val_log.txt', 'a') as valstream:
+                    logprint('-' * 64, [stream, valstream])
+                    sentence_ac, atom_ac, link_ac = parser.eval_epoch(val_dl, link=linking_weight != 0)
+                    logprint(f' Sentence Accuracy:\t\t{(sentence_ac * 100):6.2f}', [stream, valstream])
+                    logprint(f' Atom Accuracy:\t\t\t{(atom_ac * 100):6.2f}', [stream, valstream])
+                    logprint(f' Link Accuracy:\t\t\t{(link_ac * 100):6.2f}', [stream, valstream])
+            logprint('\n', [stream])
             log.append((e, epoch_lr, supertagging_loss, linking_loss))
 
             if save:

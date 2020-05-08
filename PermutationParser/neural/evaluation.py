@@ -1,28 +1,28 @@
 from PermutationParser.neural.model import Parser
-from PermutationParser.neural.schedules import DataLoader
-from PermutationParser.parsing.utils import (Analysis, sample_to_analysis, get_polarities_and_indices, polish_fn)
+from PermutationParser.parsing.utils import Analysis, sample_to_analysis
 from PermutationParser.neural.utils import Tokenizer, AtomTokenizer
 from PermutationParser.data.sample import load_stored, Sample
 import torch
 
-from typing import List, Callable, Tuple
+from typing import List, Callable, Tuple, Optional
 from functools import reduce
 
 from operator import eq, add
-from editdistance import distance
 
 
 def make_stuff() -> Tuple[Parser, List[Sample]]:
-    train, dev, test = load_stored()
-    parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 128, 'cpu')
-    parser.load_state_dict(torch.load('./stored_models/dd/200.model', map_location='cpu')['model_state_dict'])
-    return parser, sorted(test, key=lambda x: len(x.polish))
+    train, dev, test = load_stored('./processed_old.p')
+    parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 128, 'cuda')
+    parser.load_state_dict(torch.load('./stored_models/encoder-5-3-128/150.model',
+                                      map_location='cuda')['model_state_dict'])
+    return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
 
 
 def infer_dataset(model: Parser, data: List[Sample], beam_size: int = 5, batch_size: int = 64) -> List[List[Analysis]]:
     ret = []
     start_from = 0
     while start_from < len(data):
+        print(start_from)
         batch = data[start_from: min(start_from + batch_size, len(data))]
         start_from += batch_size
         batch_analyses = model.infer([' '.join(sample.words) for sample in batch], beam_size)
@@ -65,7 +65,9 @@ def measure_typing_accuracy(beams: List[List[Analysis]], corrects: List[Analysis
 
 
 # Float Comparisons
-def token_accuracy(x: Analysis, y: Analysis) -> Tuple[int, int]:
+def token_accuracy(x: Optional[Analysis], y: Analysis) -> Tuple[int, int]:
+    if x is None:
+        return 0, len(y.types) + 1
     return (len(list(filter(lambda equal: equal,
                             map(lambda pred, true: eq(pred, true),
                                 [t.depolarize() for t in x.types + [x.conclusion]],
@@ -75,6 +77,8 @@ def token_accuracy(x: Analysis, y: Analysis) -> Tuple[int, int]:
 
 def best_in_beam(beam: List[Analysis], correct: Analysis, comp: Callable[[Analysis, Analysis], Tuple[int, int]])  \
         -> Tuple[int, int]:
+    if not len(beam):
+        return token_accuracy(None, correct)
     return max(list(map(lambda x: comp(x, correct), beam)))
 
 

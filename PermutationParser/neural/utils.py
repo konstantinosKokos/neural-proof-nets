@@ -116,6 +116,33 @@ class AtomTokenizer(object):
         return samples_to_batch(samples, self, tokenizer)
 
 
+Item = Tuple[LongTensor, LongTensor, List[LongTensor], List[LongTensor], List[Matrix]]
+Batch = Tuple[LongTensor, LongTensor, List[List[LongTensor]], List[List[LongTensor]], List[LongTensor]]
+
+
+def vectorize_sample(sample: Sample, atokenizer: 'AtomTokenizer', tokenizer: Tokenizer) -> Item:
+    symbols = tokenizer.encode_sample(sample)
+    embedding_ids = LongTensor(symbols)
+    polishes = sample.polish
+    _atom_ids = atokenizer.convert_atoms_to_ids(polishes)
+    atom_ids = LongTensor(_atom_ids)
+    _positives = sample.positive_ids
+    _negatives = sample.negative_ids
+    positives = tensorize_sentence_indexers(_positives)
+    negatives = tensorize_sentence_indexers(_negatives)
+    matrices = sample.matrices
+    return embedding_ids, atom_ids, positives, negatives, matrices
+
+
+def batchify_vectorized_samples(inps: List[Item], padding_value_word: int, padding_value_symbol: int,
+                                max_difficulty: int, exclude_singular: bool) -> Batch:
+
+    _embedding_ids, _atom_ids, _positives, _negatives, _matrices = list(zip(*inps))
+    embedding_ids = pad_sequence(_embedding_ids, padding_value=padding_value_word)
+    atom_ids = pad_sequence(_atom_ids, padding_value=padding_value_symbol)
+    return embedding_ids, atom_ids, _positives, _negatives, make_permutors(_matrices, max_difficulty, exclude_singular)
+
+
 def samples_to_batch(samples: List[Sample], atokenizer: 'AtomTokenizer', tokenizer: Tokenizer) \
         -> Tuple[LongTensor, LongTensor, List[List[LongTensor]], List[List[LongTensor]]]:
     symbols: List[ints] = tokenizer.encode_samples(samples)
@@ -137,10 +164,6 @@ def samples_to_batch(samples: List[Sample], atokenizer: 'AtomTokenizer', tokeniz
 def make_atom_mapping(samples: List[Sample]) -> Mapping[str, int]:
     polishes: strs = list(chain.from_iterable(map(lambda sample: sample.polish, samples)))
     return {**{'[PAD]': 0}, **{p: i + 1 for i, p in enumerate(sorted(set(polishes)))}}
-
-
-def tensorize_matrix(matrix: Matrix) -> LongTensor:
-    return LongTensor(matrix).argmax(dim=-1)
 
 
 def measure_linking_accuracy(pred: List[Tensor], truth: List[Tensor]) -> Tuple[int, int]:
@@ -170,8 +193,11 @@ def measure_supertagging_accuracy(pred: LongTensor, truth: LongTensor, ignore_id
            (num_correct_words - num_masked_words, pred.shape[0] * pred.shape[1] - num_masked_words)
 
 
-def make_permutors(samples: List[Sample], max_difficulty: int, exclude_singular: bool = True) -> List[LongTensor]:
-    matrices = list(map(lambda sample: sample.matrices, samples))
+def make_permutors(matrices: List[List[Matrix]], max_difficulty: int, exclude_singular: bool = True) \
+        -> List[LongTensor]:
+    def tensorize_matrix(matrix: Matrix) -> LongTensor:
+        return LongTensor(matrix).argmax(dim=-1)
+
     permutors = list(filter(lambda matrix: matrix, chain.from_iterable(matrices)))
     distinct_shapes = set(map(lambda permutor: len(permutor), permutors))
     if exclude_singular:
@@ -179,7 +205,6 @@ def make_permutors(samples: List[Sample], max_difficulty: int, exclude_singular:
     distinct_shapes = sorted(distinct_shapes)
 
     grouped_permutors = []
-
     for shape in distinct_shapes:
         if shape > max_difficulty:
             break
@@ -189,25 +214,6 @@ def make_permutors(samples: List[Sample], max_difficulty: int, exclude_singular:
                                                       this_shape_permutors))))
 
     return grouped_permutors
-
-
-def make_pos_encodings(b: int, n: int, d_model: int, freq: int = 10000, device: str = 'cpu') -> Tensor:
-    pe = torch.zeros(n, d_model, device=device)
-    position = torch.arange(0, n, device=device, dtype=torch.float).unsqueeze(1)
-    div_term = torch.exp(torch.arange(0, d_model, 2, device=device, dtype=torch.float) *
-                         - (torch.log(torch.tensor(freq, dtype=torch.float, device=device)) / d_model))
-    pe[:, 0::2] = torch.sin(position * div_term)
-    pe[:, 1::2] = torch.cos(position * div_term)
-    return pe.repeat(b, 1, 1)
-
-
-class PositionalEncoder(Module):
-    def __init__(self, dropout_rate: float = 0.1):
-        super(PositionalEncoder, self).__init__()
-        self.dropout = Dropout(p=dropout_rate)
-
-    def forward(self, b: int, n: int, d_model: int, freq: int = 1000, device: str = 'cpu'):
-        return self.dropout(make_pos_encodings(b, n, d_model, freq, device))
 
 
 class FuzzyLoss(Module):
@@ -227,13 +233,6 @@ class FuzzyLoss(Module):
         mask = y == self.ignore_index
         y_float[mask.unsqueeze(1).repeat(1, self.nc)] = 0
         return self.loss_fn(torch.log_softmax(x.view(-1, self.nc), dim=-1), y_float)
-
-
-def sigsoftmax(x: Tensor, dim: int) -> Tensor:
-    sigx = torch.sigmoid(x) * torch.exp(x)
-    rank = len(sigx.shape)
-    norm = torch.sum(sigx, dim=dim).unsqueeze(dim).repeat([1 if i != dim else sigx.shape[i] for i in range(rank)])
-    return sigx / norm
 
 
 def count_parameters(model: Module) -> int:

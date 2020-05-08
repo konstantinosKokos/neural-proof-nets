@@ -2,9 +2,11 @@ from math import cos, radians, ceil
 from typing import *
 
 from torch.optim import Optimizer
-from torch.utils.data import Dataset, DataLoader
 
+from torch.utils.data import Dataset, DataLoader
+from torch import Tensor, LongTensor
 from PermutationParser.data.sample import Sample
+from PermutationParser.neural.utils import batchify_vectorized_samples, Item, Batch
 
 
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:
@@ -108,26 +110,27 @@ class Scheduler(object):
 
 
 class ParseData(Dataset):
-    def __init__(self, samples: List[Sample]):
+    def __init__(self, samples: List[Item]):
         super(ParseData, self).__init__()
         self.samples = samples
 
-    def __getitem__(self, item: int) -> Sample:
+    def __getitem__(self, item: int) -> Item:
         return self.samples[item]
 
     def __len__(self) -> int:
         return len(self.samples)
 
 
-def make_dataloader(samples: List[Sample], batch_size: int = 128, shuffle: bool = True) -> DataLoader:
+def make_dataloader(samples: List[Item], spad: int, wpad: int, max_difficulty: int, exclude_singular: bool,
+                    batch_size: int, shuffle: bool) -> DataLoader:
     dataset = ParseData(samples)
 
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=lambda x: x)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
+                      collate_fn=lambda x: batchify_vectorized_samples(inps=x, padding_value_word=wpad,
+                                                                       padding_value_symbol=spad,
+                                                                       max_difficulty=max_difficulty,
+                                                                       exclude_singular=exclude_singular))
 
 
-def get_nbatches(epoch_len: int, trainset: List[Sample], batch_size: int) -> int:
-    """
-        Returns number of batches as a function of epoch.
-    """
-    dataset_size = len([sample for sample in trainset if len(sample.polish) <= epoch_len])
-    return ceil(dataset_size / batch_size)
+def get_nbatches(trainset: List[Sample], batch_size: int) -> int:
+    return ceil(len(trainset) / batch_size)

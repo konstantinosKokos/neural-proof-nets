@@ -7,10 +7,10 @@ from PermutationParser.neural.multi_head_atn import MultiHeadAttention
 
 
 class FFN(Module):
-    def __init__(self, d_model: int, d_ff: int, dropout_rate: float = 0.1):
+    def __init__(self, d_model: int, d_ff: int, dropout_rate: float = 0.1, d_out: Optional[int] = None):
         super(FFN, self).__init__()
         self.linear_one = Linear(d_model, d_ff, bias=True)
-        self.linear_two = Linear(d_ff, d_model, bias=True)
+        self.linear_two = Linear(d_ff, d_model, bias=True) if d_out is None else Linear(d_ff, d_out)
         self.dropout = Dropout(dropout_rate)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -98,51 +98,4 @@ def make_decoder(num_layers: int, num_heads_enc: int, num_heads_dec: int, d_enco
     return Sequential(*[DecoderLayer(num_heads_enc=num_heads_enc, num_heads_dec=num_heads_dec,
                                      d_encoder=d_encoder, d_decoder=d_decoder, d_atn_enc=d_atn_enc, d_atn_dec=d_atn_dec,
                                      d_v_enc=d_v_enc, d_v_dec=d_v_dec, d_interm=d_interm, dropout_rate=dropout_rate)
-                        for _ in range(num_layers)])
-
-
-class BiEncoderLayer(Module):
-    def __init__(self, guide_heads: int, self_heads: int, d_guide: int, d_self: int,
-                 d_atn_guide: int, d_atn_self: int, d_v_guide: int, d_v_self: int, d_interm: int,
-                 dropout_rate: float = 0.1):
-        super(BiEncoderLayer, self).__init__()
-        self.dropout = Dropout(dropout_rate)
-        self.self_atn = MultiHeadAttention(num_heads=self_heads, d_q_in=d_self, d_k_in=d_self,
-                                           d_v_in=d_self, d_atn=d_atn_self, d_v=d_v_self,
-                                           d_out=d_self, dropout_rate=dropout_rate)
-        self.ln_self_atn = LayerNorm(d_self)
-        self.cross_atn = MultiHeadAttention(num_heads=guide_heads, d_q_in=d_self, d_k_in=d_guide,
-                                            d_v_in=d_guide, d_atn=d_atn_guide, d_v=d_v_guide,
-                                            d_out=d_self, dropout_rate=dropout_rate)
-        self.ln_cross_atn = LayerNorm(d_self)
-        self.ffn = FFN(d_model=d_self, d_ff=d_interm, dropout_rate=dropout_rate)
-        self.ln_ffn = LayerNorm(d_self)
-
-    def forward(self, inps: Tuple[Tensor, LongTensor, Tensor, LongTensor]) \
-            -> Tuple[Tensor, LongTensor, Tensor, LongTensor]:
-        guide_in, guide_mask, self_in, self_mask = inps
-
-        s_out = self_in.shape[1]
-
-        cross_atn = self.cross_atn(self_in, guide_in, guide_in, guide_mask[:, :s_out, :])
-        cross_atn = self.dropout(cross_atn)
-        cross_atn = self_in + cross_atn
-        cross_atn = self.ln_cross_atn(cross_atn)
-
-        self_atn = self.self_atn(cross_atn, self_in, self_in, self_mask)
-        self_atn = self.dropout(self_atn) + self_in
-        self_atn = self.ln_self_atn(self_atn)
-
-        out = self.ffn(self_atn)
-        out = self.dropout(out) + self_atn
-        return guide_in, guide_mask, self.ln_ffn(out), self_mask
-
-
-def make_bicoder(num_layers: int, num_heads_guide: int, num_heads_self: int, d_guide: int, d_self: int,
-                 d_atn_guide: int, d_atn_self: int, d_v_guide: int, d_v_self: int, d_interm: int,
-                 dropout_rate: float = 0.1):
-    return Sequential(*[BiEncoderLayer(guide_heads=num_heads_guide, self_heads=num_heads_self,
-                                       d_guide=d_guide, d_self=d_self, d_atn_guide=d_atn_guide, d_atn_self=d_atn_self,
-                                       d_v_guide=d_v_guide, d_v_self=d_v_self, d_interm=d_interm,
-                                       dropout_rate=dropout_rate)
                         for _ in range(num_layers)])
