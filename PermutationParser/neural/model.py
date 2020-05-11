@@ -17,7 +17,7 @@ from PermutationParser.neural.transformer import make_decoder, FFN
 
 class Parser(Module):
     def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, enc_dim: int = 768,
-                 dec_dim: int = 128, device: str = 'cpu'):
+                 dec_dim: int = 768, device: str = 'cpu'):
         super(Parser, self).__init__()
         self.enc_dim = enc_dim
         self.dec_dim = dec_dim
@@ -29,7 +29,7 @@ class Parser(Module):
         self.dropout = Dropout(0.1)
         self.enc_heads = 12
         self.dec_heads = 12
-        self.d_atn_dec = 64
+        self.d_atn_dec = self.dec_dim//self.dec_heads
 
         self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
         self.supertagger = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
@@ -385,19 +385,19 @@ class Parser(Module):
 
         words, types, pos_idxes, neg_idxes, grouped_permutors = batch
         atom_mask = self.make_atom_mask(types)
+        true_embeddings = self.atom_embedder(types.to(self.device))
 
         max_length = types.shape[1]
         temp = self.decode_greedy(words, max_decode_length=max_length)
-        type_predictions, atom_embeddings, encoder_output, wmask, _ = temp
+        type_predictions, _, encoder_output, wmask, _ = temp
         type_predictions = type_predictions[:, 1:-1]
-        atom_embeddings = atom_embeddings[:, :-1]
 
         # supertagging
         types = types[:, 1:].to(self.device)
 
         if link:
             # linking
-            links = self.link_eval(atom_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
+            links = self.link_eval(true_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
             permutors = [perm.to(self.device) for perm in grouped_permutors]
 
             return (measure_linking_accuracy(links, permutors),
@@ -438,7 +438,7 @@ class Parser(Module):
         if beam_size == 1:
             temp = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
             type_preds, atom_embeddings, encoder_output, wmask_, _ = temp
-            type_preds = list(map(lambda x: [x], type_preds.tolist()))
+            type_preds = [[x] for x in type_preds.tolist()]
             atom_embeddings = atom_embeddings.unsqueeze(1)
         else:
             temp = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
@@ -450,10 +450,15 @@ class Parser(Module):
         # filter decoded atoms that count at least as many types as words
         atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
 
-        tmp = self.type_parser.analyze_beam_batch(sents, atom_seqs)
-        if not len(tmp):
-            return [[] for _ in range(len(sents))]
-        ids, atom_lens, analyses = list(zip(*tmp))
+        analyses = self.type_parser.analyze_beam_batch(sents, atom_seqs)
+        valid_for_linking = [((s, b), len(analyses[s][b].polish), analyses[s][b])
+                             for s in range(len(analyses))
+                             for b in range(len(analyses[s]))
+                             if analyses[s][b].polish is not None]
+        if not valid_for_linking:
+            return analyses
+
+        ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
         atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
 
         atom_reprs = torch.zeros(len(ids), max(atom_lens) - 1, self.dec_dim, device=self.device)
@@ -464,12 +469,11 @@ class Parser(Module):
             word_reprs[i] = encoder_output[s]
             wmask[i] = wmask_[s]
 
-        positive_ids, negative_ids = self.type_parser.analyses_to_indices(analyses)
+        positive_ids, negative_ids = self.type_parser.analyses_to_indices(valid_analyses)
 
         links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
         links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
-        for pa, link in zip(analyses, links):
-            pa.fill_matches(link)
+        for va, link in zip(valid_analyses, links):
+            va.fill_matches(link)
 
-        ianalyses = iter(analyses)
-        return [[ianalyses.__next__() for b in range(beam_size) if (s, b) in ids] for s in range(len(sents))]
+        return analyses
