@@ -218,7 +218,7 @@ def make_permutors(matrices: List[List[Matrix]], max_difficulty: int, exclude_si
 
 class FuzzyLoss(Module):
     def __init__(self, loss_fn: Module, num_classes: int,
-                 mass_redistribution: float, ignore_index: int = 0) -> None:
+                 mass_redistribution: float, ignore_index: List[int]) -> None:
         super(FuzzyLoss, self).__init__()
         self.loss_fn = loss_fn
         self.nc = num_classes
@@ -228,9 +228,11 @@ class FuzzyLoss(Module):
     def __call__(self, x: Tensor, y: LongTensor) -> Tensor:
         y = y.flatten()
         y_float = torch.zeros(x.shape[0] * x.shape[1], self.nc, device=x.device, dtype=torch.float)
-        y_float.fill_(self.mass_redistribution / (self.nc-2))
+        y_float.fill_(self.mass_redistribution / (self.nc-(1 + len(self.ignore_index))))
         y_float.scatter_(1, y.unsqueeze(1), 1 - self.mass_redistribution)
-        mask = y == self.ignore_index
+        mask = torch.zeros_like(y, dtype=torch.bool)
+        for idx in self.ignore_index:
+            mask = torch.bitwise_or(mask, y == idx)
         y_float[mask.unsqueeze(1).repeat(1, self.nc)] = 0
         return self.loss_fn(torch.log_softmax(x.view(-1, self.nc), dim=-1), y_float)
 
