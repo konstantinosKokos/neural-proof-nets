@@ -128,7 +128,7 @@ def get_decoration(functor: FunctorType):
 
 
 def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: StrMapping, upward: bool,
-             varcount: int, add_dependencies: bool = True) -> Tuple[str, int]:
+             varcount: int, add_dependencies: bool) -> Tuple[str, int]:
     if add_dependencies:
         decorate = translate_decoration
     else:
@@ -137,27 +137,25 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
     if upward:
         # leaf case, cross to input
         if node.terminal:
-            ret, varcount = traverse(graph, backward_dict[idx], forward_dict, backward_dict, not upward, varcount)
-            return ret, varcount
+            return traverse(graph, backward_dict[idx], forward_dict, backward_dict, False, varcount, add_dependencies)
         else:
             ret = f'λx{translate_id(varcount)}.'
             varcount += 1
             ret2, varcount = traverse(graph, graph.to_output(node).idx, forward_dict,
-                                      backward_dict, upward, varcount)
+                                      backward_dict, upward, varcount, add_dependencies)
             return ret+ret2, varcount
     else:
         # root case
         if not graph.downward(node):
             # terminal root case
             if node.terminal:
-                ret = f' {node.name}'
-                return ret, varcount
+                return f' {node.name}', varcount
             else:
                 # root impl case, move to other branch, switch mode
                 if node.polarity:
                     ret = f'({node.name}'
                     ret2, varcount = traverse(graph, graph.to_output(node).idx, forward_dict,
-                                              backward_dict, not upward, varcount)
+                                              backward_dict, not upward, varcount, add_dependencies)
                     if node.decoration in {'mod', 'app', 'predm', 'det'}:
                         return f'{ret}{decorate(node.decoration)} {ret2})', varcount
                     else:
@@ -167,17 +165,15 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
         else:
             if node.terminal:
                 try:
-                    ret, varcount = traverse(graph, graph.to_input(node).idx, forward_dict,
-                                             backward_dict, upward, varcount)
-                    return ret, varcount
+                    return traverse(graph, graph.to_input(node).idx, forward_dict,
+                                             backward_dict, upward, varcount, add_dependencies)
                 except AssertionError:
-                    ret = f'x{translate_id(varcount - 1)}'
-                    return ret, varcount
+                    return f'x{translate_id(varcount - 1)}', varcount
             else:
                 ret2, varcount = traverse(graph, graph.to_input(node).idx, forward_dict,
-                                          backward_dict, upward, varcount)
+                                          backward_dict, upward, varcount, add_dependencies)
                 ret3, varcount = traverse(graph, graph.to_output(node).idx, forward_dict,
-                                          backward_dict, not upward, varcount)
+                                          backward_dict, not upward, varcount, add_dependencies)
                 if node.decoration in {'mod', 'app', 'predm', 'det'}:
                     ret2 += decorate(node.decoration)
                 else:
