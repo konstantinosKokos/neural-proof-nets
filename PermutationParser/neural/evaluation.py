@@ -12,17 +12,16 @@ from operator import eq, add
 
 def make_stuff() -> Tuple[Parser, List[Sample]]:
     train, dev, test = load_stored('./processed_old.p')
-    parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 128, 'cuda')
-    parser.load_state_dict(torch.load('./stored_models/encoder-5-3-128/150.model',
+    parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 768, 'cuda')
+    parser.load_state_dict(torch.load('./stored_models/5-3-12-768-32-nll/140.model',
                                       map_location='cuda')['model_state_dict'])
     return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
 
 
-def infer_dataset(model: Parser, data: List[Sample], beam_size: int = 5, batch_size: int = 64) -> List[List[Analysis]]:
+def infer_dataset(model: Parser, data: List[Sample], beam_size: int, batch_size: int) -> List[List[Analysis]]:
     ret = []
     start_from = 0
     while start_from < len(data):
-        print(start_from)
         batch = data[start_from: min(start_from + batch_size, len(data))]
         start_from += batch_size
         batch_analyses = model.infer([' '.join(sample.words) for sample in batch], beam_size)
@@ -39,8 +38,11 @@ def types_correct(x: Analysis, y: Analysis) -> bool:
     return x.types == y.types and x.conclusion == y.conclusion
 
 
-def lambdas_correct(x: Analysis, y: Analysis) -> bool:
-    return x.lambda_term == y.lambda_term and x.types == y.types and x.conclusion == y.conclusion
+def lambdas_correct(x: Analysis, y: Analysis, check_decoration: bool) -> bool:
+    if check_decoration:
+        return x.lambda_term == y.lambda_term and x.types == y.types and x.conclusion == y.conclusion
+    else:
+        return x.lambda_term_no_dec == y.lambda_term_no_dec
 
 
 def match_in_beam(beam: List[Analysis], correct: Analysis,
@@ -56,8 +58,12 @@ def matches_in_beams(beams: List[List[Analysis]], corrects: List[Analysis],
                                corrects))))
 
 
-def measure_lambda_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
-    return matches_in_beams(beams, corrects, lambdas_correct) / len(beams)
+def measure_lambda_accuracy(beams: List[List[Analysis]], corrects: List[Analysis], check_decorations: bool) -> float:
+    if check_decorations:
+        comp = lambda x, y: lambdas_correct(x, y, True)
+    else:
+        comp = lambda x, y: lambdas_correct(x, y, False)
+    return matches_in_beams(beams, corrects, comp) / len(beams)
 
 
 def measure_typing_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
@@ -87,3 +93,19 @@ def measure_token_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]
                                      best_in_beam(beam, correct, token_accuracy),
                                      beams, corrects))))
     return reduce(add, best) / reduce(add, total)
+
+
+def fill_table(parser: Parser, kappas: List[int], data: List[Sample]):
+    truth = data_to_analyses(data)
+    for k in kappas:
+        print(f'{k =}')
+        predictions = infer_dataset(parser, data, k, 256)
+        token_acc = measure_token_accuracy(predictions, truth)
+        print(f'{token_acc =}')
+        typing_acc = measure_typing_accuracy(predictions, truth)
+        print(f'{typing_acc =}')
+        lambda_acc = measure_lambda_accuracy(predictions, truth, False)
+        print(f'{lambda_acc =}')
+        lambda_dec_acc = measure_lambda_accuracy(predictions, truth, True)
+        print(f'{lambda_dec_acc =}')
+

@@ -31,11 +31,13 @@ class Analysis:
     axiom_links: Optional[IntMapping] = None
     proof_structure: Optional[Graph] = None
     lambda_term: Optional[str] = None
+    lambda_term_no_dec: Optional[str] = None
 
     def __init__(self, words: strs, types: Optional[WordTypes], conclusion: Optional[WordType], polish: Optional[strs],
                  atom_set: Optional[Atoms], positive_ids: Optional[List[ints]], negative_ids: Optional[List[ints]],
                  idx_to_polish: Optional[IntMapping], axiom_links: Optional[IntMapping] = None,
-                 proof_structure: Optional[Graph] = None, lambda_term: str = None):
+                 proof_structure: Optional[Graph] = None, lambda_term: Optional[str] = None,
+                 lambda_term_no_dec: Optional[str] = None):
         self.words = words
         self.types = types
         self.conclusion = conclusion
@@ -47,6 +49,7 @@ class Analysis:
         self.axiom_links = axiom_links
         self.proof_structure = proof_structure
         self.lambda_term = lambda_term
+        self.lambda_term_no_dec = lambda_term_no_dec
 
     def __len__(self):
         return len(self.polish) if self.polish is not None else 0
@@ -70,7 +73,7 @@ class Analysis:
         neg: ints
         match: ints
         pnet: IntMapping = dict()
-        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion)
+        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion, False)
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
@@ -87,8 +90,11 @@ class Analysis:
         self.lambda_term = traverse(self.proof_structure, str(self.conclusion.index),
                                     {str(k): str(v) for k, v in self.axiom_links.items()},
                                     {str(v): str(k) for k, v in self.axiom_links.items()},
-                                    True,
-                                    0)[0]
+                                    True, 0)[0]
+        self.lambda_term_no_dec = traverse(self.proof_structure, str(self.conclusion.index),
+                                    {str(k): str(v) for k, v in self.axiom_links.items()},
+                                    {str(v): str(k) for k, v in self.axiom_links.items()},
+                                    True, 0, add_dependencies=False)[0]
 
 
 class TypeParser(object):

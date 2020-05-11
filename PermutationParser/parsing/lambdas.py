@@ -86,10 +86,10 @@ class Graph(object):
         return upward_output[0]
 
 
-def make_graph(words: strings, premises: WordTypes, conclusion: WordType) -> Graph:
+def make_graph(words: strings, premises: WordTypes, conclusion: WordType, add_types: bool) -> Graph:
     graph = Graph()
     words = list(map(lambda w, t:
-                     f'{w}::{translate_type(t.depolarize().decolor())}',
+                     f'{w}::{translate_type(t.depolarize().decolor())}' if add_types else f'{w}',
                      words,
                      premises + [conclusion]))
     graph.add_intra_graphs(words, premises + [conclusion])

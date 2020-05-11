@@ -16,7 +16,7 @@ Atoms = List[AtomicType]
 MWU = AtomicType('_MWU')
 
 # _atom_collations = {'N': 'NP', 'VNW': 'NP', 'SPEC': 'NP', 'ADJ': 'AP'}
-_atom_collations = {'SPEC': 'NP', 'VNW': 'NP'}
+_atom_collations = {'SPEC': 'NP'}
 # _atom_collations = dict()
 
 
