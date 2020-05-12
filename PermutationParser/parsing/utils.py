@@ -224,10 +224,12 @@ def sample_to_analysis(sample: Sample) -> Analysis:
                             negative_sep))
 
     pstruct = make_graph(words + ['conc'], [t for t in types if t != MWU], conclusion_type, False)
-    lambda_term = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
-                           {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=False)[0]
+    lambda_term_dec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
+                                 {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=True)[0]
+    lambda_term_nodec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
+                                 {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=False)[0]
 
     return Analysis(words=words, types=types, conclusion=conclusion_type,
                     polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
                     idx_to_polish=polish_from_index, axiom_links={k: v for k, v in sample.proof},
-                    proof_structure=pstruct, lambda_term=lambda_term)
+                    proof_structure=pstruct, lambda_term=lambda_term_dec, lambda_term_no_dec=lambda_term_nodec)
