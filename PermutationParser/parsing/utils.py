@@ -78,7 +78,6 @@ class Analysis:
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
-
         for pos, neg, match in zip(self.positive_ids, self.negative_ids, matrices):
             for i, p in enumerate(pos):
                 n_idx = match[i]
@@ -190,7 +189,7 @@ class TypeParser(object):
         negative_sep = sep(negative, local_atom_set)
 
         polished = polish_fn(sent)
-        positional_ids = index_from_polish(polished, offset=-1)
+        positional_ids = index_from_polish(polished, offset=0)
         polish_from_index = {v: k for k, v in positional_ids.items()}
 
         positive_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
@@ -226,7 +225,7 @@ def sample_to_analysis(sample: Sample) -> Analysis:
 
     pstruct = make_graph(words + ['conc'], [t for t in types if t != MWU], conclusion_type, False)
     lambda_term = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
-                           {str(v): str(k) for k, v in sample.proof}, True, 0)[0]
+                           {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=False)[0]
 
     return Analysis(words=words, types=types, conclusion=conclusion_type,
                     polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
