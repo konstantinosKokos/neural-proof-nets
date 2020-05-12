@@ -141,13 +141,13 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
         decorate = nodecorate
     node = graph.get_node(idx)
     if upward:
-        # leaf case, cross to input
         if node.terminal:
             return traverse(graph, backward_dict[idx], forward_dict, backward_dict, False, varcount, add_dependencies)
         else:
             ret = f'λx{translate_id(varcount)}.'
+            varcount += 1
             ret2, varcount = traverse(graph, graph.get_neg_daughter(node).idx, forward_dict,
-                                      backward_dict, True, varcount + 1, add_dependencies)
+                                      backward_dict, True, varcount, add_dependencies)
             return ret+ret2, varcount
     else:
         proot = graph.get_pos_root(node)
@@ -170,16 +170,12 @@ def traverse(graph: Graph, idx: str, forward_dict: StrMapping, backward_dict: St
         else:
             if node.terminal:
                 return traverse(graph, proot.idx, forward_dict, backward_dict, False, varcount, add_dependencies)
-                # if daughter is None:
-                #     return f'x{translate_id(varcount-1)}', varcount
-                # else:
-                #     return traverse(graph, daughter.idx, forward_dict, backward_dict, False, varcount, add_dependencies)
             else:
                 daughter = graph.get_neg_daughter(node)
-                ret_left, varcount = traverse(graph, daughter.idx, forward_dict, backward_dict,
-                                              True, varcount, add_dependencies)
-                ret_right, varcount = traverse(graph, proot.idx, forward_dict, backward_dict,
-                                               False, varcount, add_dependencies)
+                ret_left, varcount = traverse(graph, proot.idx, forward_dict, backward_dict,
+                                              False, varcount, add_dependencies)
+                ret_right, varcount = traverse(graph, daughter.idx, forward_dict, backward_dict,
+                                               True, varcount, add_dependencies)
                 if node.decoration in {'mod', 'app', 'predm', 'det'}:
                     ret_left += decorate(node.decoration)
                 else:
