@@ -56,10 +56,10 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
     devset = [vectorize_sample(s, atokenizer, tokenizer) for s in sorted(devset, key=lambda x: len(x.polish))]
     testset = [vectorize_sample(s, atokenizer, tokenizer) for s in sorted(testset, key=lambda x: len(x.polish))]
 
-    train_dl = make_dataloader(trainset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, True,
+    train_dl = make_dataloader(trainset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 32, True,
                                train_batch, True)
-    dev_dl = make_dataloader(devset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, False, val_batch, False)
-    test_dl = make_dataloader(testset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 20, False,
+    dev_dl = make_dataloader(devset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 32, False, val_batch, False)
+    test_dl = make_dataloader(testset, atokenizer.pad_token_id, tokenizer.core.pad_token_id, 32, False,
                               val_batch, False)
 
     print('Read data.')
@@ -84,7 +84,8 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
 
     _opt = torch.optim.AdamW(param_groups, lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-05)
     opt = Scheduler(_opt, schedule, grad_scales)
-    fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1)
+    fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1,
+                           ignore_index=[parser.atom_tokenizer.pad_token_id, parser.atom_tokenizer.sos_token_id])
 
     if model_path is not None:
         step_num, opt_dict, init_epoch = load_model(parser, model_path)
@@ -97,13 +98,12 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
     if save_to_dir is None:
         save_to_dir = './stored_models'
 
-    log = []
     for e in range(init_epoch, num_epochs):
         # epoch settings
         validate = True if e == 4 or (e % 20 == 0 and e != 0) else False
         save = True if e == 4 or (e % 10 == 0 and e != 0) else True if e == num_epochs - 1 else False
         epoch_lr = opt.lr
-        linking_weight = 1  # 0 if e < 5 else 1
+        linking_weight = 0.5
 
         with open(f'{save_to_dir}/{version}/log.txt', 'a') as stream:
             logprint('=' * 64, [stream])
@@ -122,7 +122,6 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
                     logprint(f' Atom Accuracy:\t\t\t{(atom_ac * 100):6.2f}', [stream, valstream])
                     logprint(f' Link Accuracy:\t\t\t{(link_ac * 100):6.2f}', [stream, valstream])
             logprint('\n', [stream])
-            log.append((e, epoch_lr, supertagging_loss, linking_loss))
 
             if save:
                 print('\tSaving')

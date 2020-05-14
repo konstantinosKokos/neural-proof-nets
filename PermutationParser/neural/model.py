@@ -2,7 +2,7 @@ from itertools import chain
 from typing import *
 
 import torch
-from torch.nn import functional, LayerNorm, Sequential
+from torch.nn import functional, LayerNorm, Sequential, Linear
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -17,7 +17,7 @@ from PermutationParser.neural.transformer import make_decoder, FFN
 
 class Parser(Module):
     def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, enc_dim: int = 768,
-                 dec_dim: int = 768, device: str = 'cpu'):
+                 dec_dim: int = 256, device: str = 'cpu'):
         super(Parser, self).__init__()
         self.enc_dim = enc_dim
         self.dec_dim = dec_dim
@@ -27,27 +27,27 @@ class Parser(Module):
         self.type_parser = TypeParser(atokenizer)
         self.tokenizer = tokenizer
         self.dropout = Dropout(0.1)
-        self.enc_heads = 12
-        self.dec_heads = 12
+        self.enc_heads = 8
+        self.dec_heads = 8
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
         self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
-        self.supertagger = make_decoder(num_layers=5, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.supertagger = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
                                         d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.atom_embedder = ComplexEmbedding(self.num_embeddings, self.dec_dim//2).to(device)
-        self.linker = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.linker = make_decoder(num_layers=1, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                    d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                    d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
                                    d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
                                    d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
         self.pos_transformation = Sequential(
-            FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim, d_out=32),
+            FFN(d_model=self.dec_dim, d_ff=self.dec_dim, d_out=32),
             LayerNorm(32)).to(device)
         self.neg_transformation = Sequential(
-            FFN(d_model=self.dec_dim, d_ff=2 * self.dec_dim, d_out=32),
+            FFN(d_model=self.dec_dim, d_ff=self.dec_dim, d_out=32),
             LayerNorm(32)).to(device)
 
         self.freeze_encoder()
@@ -459,20 +459,21 @@ class Parser(Module):
             return analyses
 
         ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
-        atom_mask = self.make_atom_mask_from_lens(list(map(lambda al: al-1, atom_lens)))
+        atom_mask = self.make_atom_mask_from_lens(atom_lens)
 
-        atom_reprs = torch.zeros(len(ids), max(atom_lens) - 1, self.dec_dim, device=self.device)
+        atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
         word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
         wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
         for i, (s, b) in enumerate(ids):
-            atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens) - 1]
+            atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
             word_reprs[i] = encoder_output[s]
             wmask[i] = wmask_[s]
 
         positive_ids, negative_ids = self.type_parser.analyses_to_indices(valid_analyses)
 
         links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
-        links = [[link.argmax(dim=-1).tolist()[0] for link in sent] for sent in links_]
+
+        links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
         for va, link in zip(valid_analyses, links):
             va.fill_matches(link)
 
