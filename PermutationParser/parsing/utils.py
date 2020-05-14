@@ -74,7 +74,8 @@ class Analysis:
         neg: ints
         match: ints
         pnet: IntMapping = dict()
-        self.proof_structure = make_graph(self.words + ['conc'], self.types, self.conclusion, False)
+        words, types = merge_mwus(self.words, self.types)
+        self.proof_structure = make_graph(words + [''], types, self.conclusion, False)
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
@@ -120,35 +121,18 @@ class TypeParser(object):
                 typing = self.sent_to_types(polishes[s][b])
                 polarized = self.polarize_sent(typing)
                 atoms_and_inds = self.get_atomset_and_indices(polarized)
+                if atoms_and_inds is None:
+                    polish, atom_set, positive_ids, negative_ids, idx_to_polish = None, None, None, None, None
+                else:
+                    polish, atom_set, positive_ids, negative_ids, idx_to_polish = atoms_and_inds
+
                 analysis = Analysis(words=words, types=polarized[1:] if polarized is not None else None,
                                     conclusion=polarized[0] if polarized is not None else None,
-                                    polish=atoms_and_inds[0] if atoms_and_inds is not None else None,
-                                    atom_set=atoms_and_inds[1] if atoms_and_inds is not None else None,
-                                    positive_ids=atoms_and_inds[2] if atoms_and_inds is not None else None,
-                                    negative_ids=atoms_and_inds[3] if atoms_and_inds is not None else None,
-                                    idx_to_polish=atoms_and_inds[4] if atoms_and_inds is not None else None)
+                                    polish=polish,  atom_set=atom_set,
+                                    positive_ids=positive_ids, negative_ids=negative_ids, idx_to_polish=idx_to_polish)
                 analyses.append(analysis)
             ret.append(analyses)
         return ret
-        #
-        #
-        # typings: List[List[Optional[OWordTypes]]]
-        # typings = [[self.sent_to_types(polish) for polish in beam] for beam in polishes]
-        # polarized: List[List[Optional[OWordTypes]]]
-        # polarized = [[self.polarize_sent(sent) for sent in beam] for beam in typings]
-        # atoms_and_indices = [[self.get_atomset_and_indices(sent) for sent in beam] for beam in polarized]
-        # valid_for_linking = [(s, b) for s in range(len(atoms_and_indices)) for b in range(len(atoms_and_indices[s]))
-        #                      if atoms_and_indices[s][b] is not None]
-        # invariance_correct = [
-        #     ((s, b),
-        #      len(atoms_and_indices[s][b][0]),
-        #      Analysis(words=sents[s].split(), types=polarized[s][b][1:], conclusion=polarized[s][b][0],
-        #               polish=atoms_and_indices[s][b][0], atom_set=atoms_and_indices[s][b][1],
-        #               positive_ids=atoms_and_indices[s][b][2], negative_ids=atoms_and_indices[s][b][3],
-        #               idx_to_polish=atoms_and_indices[s][b][4]))
-        #     for s, b in valid_for_linking
-        # ]
-        # return invariance_correct
 
     def analyses_to_indices(self, analyses: List[Analysis]) -> Tuple[List[List[LongTensor]], List[List[LongTensor]]]:
         positive_ids, negative_ids = list(zip(*[analysis.get_ids() for analysis in analyses]))
@@ -196,7 +180,9 @@ class TypeParser(object):
                                 positive_sep))
         negative_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
                                 negative_sep))
-
+        for p, n in zip(positive_ids, negative_ids):
+            if len(p) != len(n):
+                return None
         return polished, local_atom_set, positive_ids, negative_ids, polish_from_index
 
 
@@ -223,9 +209,10 @@ def sample_to_analysis(sample: Sample) -> Analysis:
     negative_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
                             negative_sep))
 
-    pstruct = make_graph(words + ['conc'], [t for t in types if t != MWU], conclusion_type, False)
+    lwords, ltypes = merge_mwus(words, types)
+    pstruct = make_graph(lwords + [''], ltypes, conclusion_type, False)
     lambda_term_dec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
-                                 {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=True)[0]
+                               {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=True)[0]
     lambda_term_nodec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
                                  {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=False)[0]
 
@@ -233,3 +220,19 @@ def sample_to_analysis(sample: Sample) -> Analysis:
                     polish=polished, atom_set=local_atom_set, positive_ids=positive_ids, negative_ids=negative_ids,
                     idx_to_polish=polish_from_index, axiom_links={k: v for k, v in sample.proof},
                     proof_structure=pstruct, lambda_term=lambda_term_dec, lambda_term_no_dec=lambda_term_nodec)
+
+
+def merge_mwus(words: List[str], types: WordTypes) -> Tuple[List[str], WordTypes]:
+    def get_word(i: int) -> str:
+        ret = words[i]
+        for j in range(i+1, len(types)):
+            if types[j] == MWU:
+                ret += f'_{words[j]}'
+            else:
+                break
+        return ret
+
+    owords = [get_word(i) if types[i] != MWU else None for i in range(len(types))]
+    words = [w for w in owords if w is not None]
+    types = [t for t in types if t != MWU]
+    return words, types
