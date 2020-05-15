@@ -411,7 +411,10 @@ def polish_to_type(symbols: strings, operators: Set[str],
             res = _res if isinstance(_res, WordType) else AtomicType(_res)
             op_class = operator_classes[symbol]
             if op_class == BoxType or op_class == DiamondType:
-                stack.append(op_class(arg, res, symbol))
+                if isinstance(arg, BoxType) and res != arg:  # case of embedded modifier
+                    stack.append(DiamondType(arg, res, symbol))
+                else:
+                    stack.append(op_class(arg, res, symbol))
             else:
                 stack.append(op_class(arg, res))
         else:
