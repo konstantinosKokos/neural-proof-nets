@@ -153,7 +153,14 @@ class TypeParser(object):
     def polarize_sent(sent: Optional[OWordTypes]) -> Optional[WordTypes]:
         if sent is None or any(map(lambda wordtype: wordtype is None, sent)):
             return None
-        idx, wordtypes = polarize_and_index_many(sent[1:], index=0)
+        idx = 0
+        wordtypes = []
+        for wt in sent[1:]:
+            if wt == MWU:
+                wordtypes.append(wt)
+            else:
+                idx, wt = polarize_and_index(wt, polarity=True, index=idx)
+                wordtypes.append(wt)
         _, conclusion = polarize_and_index(sent[0], polarity=False, index=idx)
         return [conclusion] + wordtypes
 
