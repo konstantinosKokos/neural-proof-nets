@@ -3,7 +3,7 @@ from typing import *
 from torch import Tensor, LongTensor
 from torch.nn import Module, Sequential, Linear, functional, LayerNorm, Dropout
 
-from PermutationParser.neural.multi_head_atn import MultiHeadAttention
+from Parser.neural.multi_head_atn import MultiHeadAttention
 
 
 class FFN(Module):

@@ -1,7 +1,7 @@
 import pickle
 from dataclasses import dataclass
 from typing import List, Set, Tuple
-from PermutationParser.parsing.milltypes import WordTypes
+from Parser.parsing.milltypes import WordTypes
 
 ProofNet = Set[Tuple[int, int]]
 Matrix = List[List[bool]]

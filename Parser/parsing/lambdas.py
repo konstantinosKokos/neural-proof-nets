@@ -1,4 +1,4 @@
-from PermutationParser.parsing.milltypes import *
+from Parser.parsing.milltypes import *
 from typing import *
 from dataclasses import dataclass
 

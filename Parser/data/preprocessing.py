@@ -4,11 +4,11 @@ from itertools import chain
 from operator import add
 from typing import Dict, Optional
 
-from PermutationParser.data.constants import PtDict, CatDict
-from PermutationParser.data.sample import *
-from PermutationParser.parsing import milltypes
-from PermutationParser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
-                                                 PolarizedType)
+from Parser.data.constants import PtDict, CatDict
+from Parser.data.sample import *
+from Parser.parsing import milltypes
+from Parser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
+                                      PolarizedType)
 
 sys.modules['LassyExtraction.milltypes'] = milltypes
 

@@ -1,4 +1,4 @@
-from PermutationParser.parsing.milltypes import AtomicType
+from Parser.parsing.milltypes import AtomicType
 
 # # # Extraction variables # # #
 # Mapping from phrasal categories and POS tags to Atomic Types

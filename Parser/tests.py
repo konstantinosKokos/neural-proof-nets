@@ -1,6 +1,6 @@
 from hypothesis import given
 from hypothesis.strategies import *
-from PermutationParser.data.preprocessing import Matrix, Matrices, ProofNet, reduce, add, convert_matches_to_matrix
+from Parser.data.preprocessing import Matrix, Matrices, ProofNet, reduce, add, convert_matches_to_matrix
 from typing import List, Tuple
 
 

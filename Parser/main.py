@@ -1,7 +1,7 @@
-from PermutationParser.neural.model import *
-from PermutationParser.neural.utils import *
-from PermutationParser.neural.schedules import *
-from PermutationParser.data.sample import load_stored
+from Parser.neural.model import *
+from Parser.neural.utils import *
+from Parser.neural.schedules import *
+from Parser.data.sample import load_stored
 
 from torch.nn import KLDivLoss
 
@@ -35,7 +35,7 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
          save_to_dir: Optional[str] = None) \
         -> Tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
     if version is None:
-        version = subprocess.check_output(['git', 'describe', '--always'], cwd='./PermutationParser').strip().decode()
+        version = subprocess.check_output(['git', 'describe', '--always'], cwd='./Parser').strip().decode()
     if save_to_dir is not None:
         os.makedirs(f'{save_to_dir}/', exist_ok=True)
     else:

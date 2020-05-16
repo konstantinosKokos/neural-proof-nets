@@ -2,14 +2,14 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import Optional, List, Tuple
 
-from PermutationParser.data.constants import ModDeps
-from PermutationParser.data.preprocessing import (strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints,
-                                                  Sample, make_atom_set, get_conclusion)
-from PermutationParser.neural.utils import AtomTokenizer, tensorize_batch_indexers, LongTensor
-from PermutationParser.parsing.milltypes import (BoxType, DiamondType, WordType, FunctorType, polish_to_type,
-                                                 get_polarities_and_indices, polarize_and_index_many,
-                                                 polarize_and_index, invariance_check)
-from PermutationParser.parsing.lambdas import Graph, make_graph, IntMapping, traverse
+from Parser.data.constants import ModDeps
+from Parser.data.preprocessing import (strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints,
+                                       Sample, make_atom_set, get_conclusion)
+from Parser.neural.utils import AtomTokenizer, tensorize_batch_indexers, LongTensor
+from Parser.parsing.milltypes import (BoxType, DiamondType, WordType, FunctorType, polish_to_type,
+                                      get_polarities_and_indices, polarize_and_index_many,
+                                      polarize_and_index, invariance_check)
+from Parser.parsing.lambdas import Graph, make_graph, IntMapping, traverse
 
 WordTypes = List[WordType]
 OWordType = Optional[WordType]

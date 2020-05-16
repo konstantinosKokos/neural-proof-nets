@@ -7,7 +7,7 @@ from torch.nn import Module, Dropout
 from torch.nn.utils.rnn import pad_sequence as _pad_sequence
 from transformers import BertTokenizer
 
-from PermutationParser.data.sample import Sample, strs, ints, Matrix
+from Parser.data.sample import Sample, strs, ints, Matrix
 
 
 class Tokenizer(object):

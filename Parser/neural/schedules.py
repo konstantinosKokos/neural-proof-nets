@@ -5,8 +5,8 @@ from torch.optim import Optimizer
 
 from torch.utils.data import Dataset, DataLoader
 from torch import Tensor, LongTensor
-from PermutationParser.data.sample import Sample
-from PermutationParser.neural.utils import batchify_vectorized_samples, Item, Batch
+from Parser.data.sample import Sample
+from Parser.neural.utils import batchify_vectorized_samples, Item, Batch
 
 
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:

@@ -1,10 +1,10 @@
-from PermutationParser.neural.model import Parser
-from PermutationParser.parsing.utils import Analysis, sample_to_analysis
-from PermutationParser.neural.utils import Tokenizer, AtomTokenizer
-from PermutationParser.data.sample import load_stored, Sample
+from Parser.neural.model import Parser
+from Parser.parsing.utils import Analysis, sample_to_analysis
+from Parser.neural.utils import Tokenizer, AtomTokenizer
+from Parser.data.sample import load_stored, Sample
 import torch
 
-from typing import List, Callable, Tuple, Optional
+from typing import List, Callable, Tuple
 from functools import reduce
 
 from operator import eq, add
@@ -33,18 +33,29 @@ def infer_dataset(model: Parser, data: List[Sample], beam_size: int, batch_size:
     return ret
 
 
+def oracle_run(model: Parser, data: List[Sample], batch_size: int) -> List[List[Analysis]]:
+    ret = []
+    start_from = 0
+    while start_from < len(data):
+        batch = data[start_from: min(start_from + batch_size, len(data))]
+        start_from += batch_size
+        batch_analyses = model.parse_with_oracle(batch)
+        ret += batch_analyses
+    return ret
+
+
 def data_to_analyses(data: List[Sample]) -> List[Analysis]:
     return [sample_to_analysis(sample) for sample in data]
 
 
 # Boolean Comparisons
 def types_correct(x: Analysis, y: Analysis) -> bool:
-    return x.types == y.types and x.conclusion == y.conclusion
+    return x.types == y.types
 
 
 def lambdas_correct(x: Analysis, y: Analysis, check_decoration: bool) -> bool:
     if check_decoration:
-        return x.lambda_term == y.lambda_term and x.types == y.types and x.conclusion == y.conclusion
+        return x.lambda_term == y.lambda_term
     else:
         return x.lambda_term_no_dec == y.lambda_term_no_dec
 
@@ -115,42 +126,30 @@ def measure_token_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]
     return reduce(add, best) / reduce(add, total)
 
 
-def fill_table(kappas: List[int], lens: List[int]):
+def fill_table(kappas: List[int]) -> None:
     parser, data = make_stuff()
 
     truths = data_to_analyses(data)
     for k in kappas:
-        print(f'{k =}')
+        print('=' * 64)
+        print(f'{k=}')
+        print('=' * 64)
         predictions = infer_dataset(parser, data, k, 256)
         ok = measure_non_failed(predictions, truths)/len(predictions)
-        print(f'{ok =}')
+        print(f'{ok=}')
         invc = measure_inv_correct(predictions, truths)/len(predictions)
         print(f'{invc=}')
         token_acc = measure_token_accuracy(predictions, truths)
-        print(f'{token_acc =}')
+        print(f'{token_acc=}')
         typing_acc = measure_typing_accuracy(predictions, truths)
-        print(f'{typing_acc =}')
+        print(f'{typing_acc=}')
         lambda_acc = measure_lambda_accuracy(predictions, truths, False)
-        print(f'{lambda_acc =}')
+        print(f'{lambda_acc=}')
         lambda_dec_acc = measure_lambda_accuracy(predictions, truths, True)
-        print(f'{lambda_dec_acc =}')
-        for i in range(len(lens) + 1):
-            maxlen = lens[i] if i != len(lens) else 1000
-            minlen = 0 if i == 0 else lens[i-1]
-            print(f'{minlen =}')
-            print(f'{maxlen =}')
-            tmp = [(truth, preds) for truth, preds in zip(truths, predictions) if minlen < len(truth.words) <= maxlen]
-            truths_l, preds_l = list(zip(*tmp))
-            ok_l = measure_non_failed(preds_l, truths_l)
-            print(f'{ok_l =}')
-            token_acc_l = measure_token_accuracy(preds_l, truths_l)
-            print(f'{token_acc_l =}')
-            typing_acc_l = measure_typing_accuracy(preds_l, truths_l)
-            print(f'{typing_acc_l =}')
-            lambda_acc_l = measure_lambda_accuracy(preds_l, truths_l, False)
-            print(f'{lambda_acc_l =}')
-            lambda_dec_acc_l = measure_lambda_accuracy(preds_l, truths_l, True)
-            print(f'{lambda_dec_acc_l =}')
+        print(f'{lambda_dec_acc=}')
     return predictions, truths
 
 
+def do_oracle_run():
+    parser, data = make_stuff()
+    return oracle_run(parser, data, 512), data_to_analyses(data)
