@@ -1,13 +1,13 @@
-from Parser.neural.model import *
-from Parser.neural.utils import *
-from Parser.neural.schedules import *
-from Parser.data.sample import load_stored
+import os
+import subprocess
+import sys
 
 from torch.nn import KLDivLoss
 
-import subprocess
-import os
-import sys
+from Parser.data.sample import load_stored
+from Parser.neural.model import *
+from Parser.neural.schedules import *
+from Parser.neural.utils import *
 
 num_epochs = 505
 warmup_epochs = 5
