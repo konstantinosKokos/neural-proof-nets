@@ -1,4 +1,3 @@
-import sys
 from functools import reduce
 from itertools import chain
 from operator import add
@@ -6,11 +5,9 @@ from typing import Dict, Optional
 
 from Parser.data.constants import PtDict, CatDict
 from Parser.data.sample import *
-from Parser.parsing import milltypes
 from Parser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
                                       PolarizedType)
 
-sys.modules['LassyExtraction.milltypes'] = milltypes
 
 Atoms = List[AtomicType]
 MWU = AtomicType('_MWU')
