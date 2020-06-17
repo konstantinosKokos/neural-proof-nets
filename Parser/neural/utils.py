@@ -12,7 +12,7 @@ from Parser.data.sample import Sample, strs, ints, Matrix
 
 class Tokenizer(object):
     def __init__(self):
-        self.core = BertTokenizer.from_pretrained('bert-base-dutch-cased')
+        self.core = BertTokenizer.from_pretrained('wietsedv/bert-base-dutch-cased')
         # self.core = RobertaTokenizer.from_pretrained("pdelobelle/robBERT-base")
 
     def encode_sample(self, sample: Sample) -> ints:
