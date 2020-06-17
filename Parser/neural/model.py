@@ -1,8 +1,4 @@
-from itertools import chain
-from typing import *
-
-import torch
-from torch.nn import functional, LayerNorm, Sequential, Linear
+from torch.nn import functional, LayerNorm, Sequential
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -31,7 +27,7 @@ class Parser(Module):
         self.dec_heads = 8
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
-        self.word_encoder = BertModel.from_pretrained("bert-base-dutch-cased").to(device)
+        self.word_encoder = BertModel.from_pretrained("wietsedv/bert-base-dutch-cased").to(device)
         self.supertagger = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
@@ -141,7 +137,6 @@ class Parser(Module):
         if s_out == 0:
             return atom_reprs
         return self.linker((self.dropout(word_reprs), word_mask, atom_reprs, atom_mask))[2]
-        # return self.linker((atom_reprs, atom_mask))[0]
 
     def link(self, atom_reprs: Tensor, atom_mask: LongTensor, word_reprs: Tensor, word_mask: LongTensor,
              pos_idxes: List[List[LongTensor]], neg_idxes: List[List[LongTensor]], exclude_singular: bool = True,
@@ -371,10 +366,7 @@ class Parser(Module):
             # axiom linking
             link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in grouped_permutors]
-            # grouped_permutors = [torch.zeros_like(link).scatter_(dim=-1, index=perm.unsqueeze(2), value=1)
-            #                      for link, perm in zip(link_weights, grouped_permutors)]
             link_loss = sum((
-                # functional.binary_cross_entropy(link, perm, reduction='mean')
                 functional.nll_loss(link.flatten(0, 1), perm.flatten(), reduction='mean')
                 for link, perm in zip(link_weights, grouped_permutors)
             ))
@@ -436,7 +428,7 @@ class Parser(Module):
         return s_correct / s_total, w_correct / w_total, l_correct / l_total
 
     @torch.no_grad()
-    def infer(self, sents: strs, beam_size: int, type_oracle: Optional = None, **kwargs) -> List[List[Analysis]]:
+    def infer(self, sents: strs, beam_size: int, **kwargs) -> List[List[Analysis]]:
         self.eval()
 
         sent_lens = [len(sent.split()) + 1 for sent in sents]
