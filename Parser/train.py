@@ -45,7 +45,8 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
     # load data and model
     _trainset, _devset, _testset = load_stored() if datapath is None else load_stored(datapath)
 
-    atokenizer = AtomTokenizer(_trainset+_devset+_testset)
+    atom_map = make_atom_mapping(_trainset+_devset+_testset)
+    atokenizer = AtomTokenizer(atom_map)
     tokenizer = Tokenizer()
 
     print('Making dataloaders.')
@@ -66,6 +67,15 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
     parser = Parser(atokenizer, tokenizer, device=device)
     print('Initialized model.')
     return train_dl, dev_dl, test_dl, nbatches, parser, version
+
+
+def init_without_datasets(atom_map_path: str = './Parser/data/atom_map.p', device: str = 'cuda') -> Parser:
+    import pickle
+    with open(atom_map_path, 'rb') as f:
+        atom_map = pickle.load(f)
+    atokenizer = AtomTokenizer(atom_map)
+    tokenizer = Tokenizer()
+    return Parser(atokenizer, tokenizer, device=device)
 
 
 def train(model_path: Optional[str] = None, data_path: Optional[str] = None,

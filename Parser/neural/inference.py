@@ -1,9 +1,9 @@
-from Parser.train import init, load_model
+from Parser.train import init_without_datasets, load_model
 _weights_path = './stored_models/model_weights.p'
 
 
 print('Initializing model...')
-model = init(version='3-1-8-256-32-nll')[4]
+model = init_without_datasets()
 print('Initialized.')
 
 print('Loading pre-trained parameters...')
