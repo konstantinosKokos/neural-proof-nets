@@ -63,8 +63,8 @@ def sents_to_batch(sents: strs, tokenizer: Tokenizer) -> LongTensor:
 
 
 class AtomTokenizer(object):
-    def __init__(self, samples: List[Sample]):
-        self.atom_map = make_atom_mapping(samples)
+    def __init__(self, atom_map: Dict[str, int]):
+        self.atom_map = atom_map
         self.inverse_atom_map = {v: k for k, v in self.atom_map.items()}
         self.sep_token = '[SEP]'
         self.sos_token = '[SOS]'
