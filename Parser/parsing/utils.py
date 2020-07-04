@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import reduce
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, overload, Any, Literal
 
 from Parser.data.constants import ModDeps
 from Parser.data.preprocessing import (strs, MWU, add, sep, index_from_polish, polish_fn, Atoms, ints,
@@ -20,6 +20,12 @@ _atom_set = make_atom_set()
 
 @dataclass(init=False)
 class Analysis:
+    """
+        Class representing a sentence, optionally associated with (1) a linear logic proof frame, (2) a proof structure
+        (bijection between atomic formulas), (3) the CHC lambda-term obtained by traversal of the proof structure if
+        it is a valid proof net. Property `lambda_term` contains the lambda term including dependency decorations and
+        type hints. Property `lambda_term_no_dec` contains the untyped lambda term.
+    """
     words: strs
     types: Optional[WordTypes] = None
     conclusion: Optional[WordType] = None
@@ -51,14 +57,43 @@ class Analysis:
         self.lambda_term = lambda_term
         self.lambda_term_no_dec = lambda_term_no_dec
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        :return: The length of atomic types in the proof frame, if one exists, else zero.
+        """
         return len(self.polish) if self.polish is not None else 0
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """
+        :return: A string representation of the proof frame as a linear logic judgement of the form
+            `w₀: T₀, ... wₙ: Tₙ ⊢ C`
+        """
         return '' if self.types is None or self.conclusion is None else \
             ', '.join([f'{w}: {t}' for w, t in zip(self.words, self.types)]) + f' ⊢ {self.conclusion}'
 
+    def __str__(self) -> str:
+        """
+        :return: A string representation of the proof frame as a linear logic judgement of the form
+            `w₀: T₀, ... wₙ: Tₙ ⊢ C`
+        """
+        return self.__repr__()
+
+    @overload
     def __eq__(self, other: 'Analysis') -> Optional[bool]:
+        pass
+
+    @overload
+    def __eq__(self, other: Any) -> Literal[False]:
+        pass
+
+    def __eq__(self, other) -> Optional[bool]:
+        """
+            Equality check between class instance and another object.
+        :param other: Object to compare against.
+        :return: True, if other is of type Analysis and there is full point-wise agreement between words, types and
+            axiom links. None if other is of type Analysis and any of the elements to be compared is None.
+            False in all other cases.
+        """
         if any(map(lambda x: x is None, [self.words, self.types, self.axiom_links, other.words, other.types,
                                          other.axiom_links])):
             return None
