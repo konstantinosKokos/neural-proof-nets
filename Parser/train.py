@@ -69,10 +69,9 @@ def init(datapath: Optional[str] = None, max_len: int = 100, train_batch: int = 
     return train_dl, dev_dl, test_dl, nbatches, parser, version
 
 
-def init_without_datasets(atom_map_path: str = './Parser/data/atom_map.p', device: str = 'cuda') -> Parser:
-    import pickle
-    with open(atom_map_path, 'rb') as f:
-        atom_map = pickle.load(f)
+def init_without_datasets(atom_map_path: str = './Parser/data/atom_map.txt', device: str = 'cuda') -> Parser:
+    with open(atom_map_path, 'r') as f:
+        atom_map = dict(map(lambda pair: (pair[0], int(pair[1])), map(lambda line: line.split('\t'), f.readlines())))
     atokenizer = AtomTokenizer(atom_map)
     tokenizer = Tokenizer()
     return Parser(atokenizer, tokenizer, device=device)
