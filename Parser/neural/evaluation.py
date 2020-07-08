@@ -14,7 +14,7 @@ def make_stuff() -> Tuple[Parser, List[Sample]]:
     train, dev, test = load_stored('./processed.p')
     atom_map = make_atom_mapping(train+dev+test)
     parser = Parser(AtomTokenizer(atom_map), Tokenizer(), 768, 256, 'cuda')
-    parser.load_state_dict(torch.load('./stored_models/3-1-8-256-32-nll/280.model',
+    parser.load_state_dict(torch.load('./stored_models/model_weights.p',
                                       map_location='cuda')['model_state_dict'])
     return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
 
