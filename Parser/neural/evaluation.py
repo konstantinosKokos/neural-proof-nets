@@ -1,6 +1,6 @@
 from Parser.neural.model import Parser
 from Parser.parsing.utils import Analysis, sample_to_analysis
-from Parser.neural.utils import Tokenizer, AtomTokenizer
+from Parser.neural.utils import Tokenizer, AtomTokenizer, make_atom_mapping
 from Parser.data.sample import load_stored, Sample
 import torch
 
@@ -12,7 +12,8 @@ from operator import eq, add
 
 def make_stuff() -> Tuple[Parser, List[Sample]]:
     train, dev, test = load_stored('./processed.p')
-    parser = Parser(AtomTokenizer(train+dev+test), Tokenizer(), 768, 256, 'cuda')
+    atom_map = make_atom_mapping(train+dev+test)
+    parser = Parser(AtomTokenizer(atom_map), Tokenizer(), 768, 256, 'cuda')
     parser.load_state_dict(torch.load('./stored_models/3-1-8-256-32-nll/280.model',
                                       map_location='cuda')['model_state_dict'])
     return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
