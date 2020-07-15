@@ -111,6 +111,7 @@ class Analysis:
         pnet: IntMapping = dict()
         words, types = merge_mwus(self.words, self.types)
         self.proof_structure = make_graph(words + [''], types, self.conclusion, False)
+        pstruct = make_graph(words + [''], types, self.conclusion, True)
 
         if self.positive_ids is None or self.negative_ids is None:
             return None
@@ -123,7 +124,7 @@ class Analysis:
             return None
 
         self.axiom_links = pnet
-        self.lambda_term = traverse(self.proof_structure, str(self.conclusion.index),
+        self.lambda_term = traverse(pstruct, str(self.conclusion.index),
                                     {str(k): str(v) for k, v in self.axiom_links.items()},
                                     {str(v): str(k) for k, v in self.axiom_links.items()},
                                     True, 0, add_dependencies=True)[0]
@@ -252,10 +253,11 @@ def sample_to_analysis(sample: Sample) -> Analysis:
                             negative_sep))
 
     lwords, ltypes = merge_mwus(words, types)
-    pstruct = make_graph(lwords + [''], ltypes, conclusion_type, False)
+    pstruct = make_graph(lwords + [''], ltypes, conclusion_type, True)
+    pstruct_nodec = make_graph(lwords + [' '], ltypes, conclusion_type, False)
     lambda_term_dec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
                                {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=True)[0]
-    lambda_term_nodec = traverse(pstruct, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
+    lambda_term_nodec = traverse(pstruct_nodec, str(conclusion_type.index), {str(k): str(v) for k, v in sample.proof},
                                  {str(v): str(k) for k, v in sample.proof}, True, 0, add_dependencies=False)[0]
 
     return Analysis(words=words, types=types, conclusion=conclusion_type,

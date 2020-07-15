@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from functools import reduce
 from operator import add
-from typing import Set, Sequence, Tuple, List, overload, Mapping
+from typing import Set, Sequence, Tuple, List, overload, Generic, Literal, TypeVar, Mapping
 
 
 class WordType(ABC):
@@ -142,9 +142,18 @@ class FunctorType(WordType):
         return FunctorType(argument=self.argument.depolarize(), result=self.result.depolarize())
 
 
-class DiamondType(FunctorType):
+Modality = TypeVar('Modality')
+
+
+class ModalFunctor(FunctorType, Generic[Modality]):
+    def __init__(self, argument: WordType, result: WordType, modality: Modality):
+        super(ModalFunctor, self).__init__(argument, result)
+        self.modality = modality
+
+
+class DiamondType(ModalFunctor[Literal['diamond']]):
     def __init__(self, argument: WordType, result: WordType, diamond: str):
-        super(DiamondType, self).__init__(argument, result)
+        super(DiamondType, self).__init__(argument, result, 'diamond')
         self.diamond = diamond
 
     def __str__(self):
@@ -170,9 +179,9 @@ class DiamondType(FunctorType):
         return set.union(self.argument.get_colors(), self.result.get_colors(), {self.diamond})
 
 
-class BoxType(FunctorType):
+class BoxType(ModalFunctor[Literal['box']]):
     def __init__(self, argument: WordType, result: WordType, box: str):
-        super(BoxType, self).__init__(argument, result)
+        super(BoxType, self).__init__(argument, result, 'box')
         self.box = box
 
     def __str__(self):
@@ -193,7 +202,7 @@ class BoxType(FunctorType):
 
     def __hash__(self):
         return super(BoxType, self).__hash__()
-
+    
     def get_colors(self) -> Set[str]:
         return set.union(self.argument.get_colors(), self.result.get_colors(), {self.box})
 
@@ -209,47 +218,6 @@ class PolarizedType(AtomicType):
 
     def depolarize(self) -> 'AtomicType':
         return AtomicType(wordtype=self.type)
-
-
-class BangType(WordType):
-    def __init__(self, wordtype: WordType):
-        self.content = wordtype
-
-    def __str__(self):
-        return f'!{self.content}'
-
-    def polish(self) -> str:
-        return str(self)
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __hash__(self) -> int:
-        return hash(str(self))
-
-    def arity(self) -> int:
-        return self.content.arity()
-
-    def __call__(self) -> str:
-        return str(self)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, BangType):
-            return False
-        else:
-            return self.content == other.content
-
-    def decolor(self) -> 'FunctorType':
-        return BangType(self.content.decolor())
-
-    def get_atomic(self) -> Set[AtomicType]:
-        return self.content.get_atomic()
-
-    def get_colors(self) -> Set[str]:
-        return self.content.get_colors()
-
-    def depolarize(self) -> 'FunctorType':
-        return BangType(self.content.depolarize())
 
 
 def polarize_and_index(wordtype: WordType, polarity: bool = True, index: int = 0) -> Tuple[int, WordType]:
@@ -348,8 +316,21 @@ def get_polarities_and_indices(wordtype: WordType) -> Tuple[List[Tuple[AtomicTyp
                         f' received {type(wordtype)} instead')
 
 
+@overload
 def depolarize(x: WordType) -> WordType:
-    return x.depolarize()
+    pass
+
+
+@overload
+def depolarize(x: WordTypes) -> WordTypes:
+    pass
+
+
+def depolarize(x):
+    if isinstance(x, WordType):
+        return x.depolarize()
+    else:
+        return list(map(depolarize, x))
 
 
 def get_polarities(wordtype: WordType) -> Tuple[List[AtomicType], List[AtomicType]]:
@@ -385,7 +366,7 @@ def operator_invariance(premises: WordTypes) -> int:
 
 
 def invariance_check(premises: WordTypes, goal: WordType) -> bool:
-    premises = list(filter(lambda type_: str(type_)[0] != '_', premises))
+    premises = list(filter(lambda type_: type_ != AtomicType('_'), premises))
     inferred = literal_invariance(premises)
     if list(inferred.values()) != [1]:
         return False
