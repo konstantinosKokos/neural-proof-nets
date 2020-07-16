@@ -28,8 +28,8 @@ class EncoderLayer(Module):
                                       d_q_in=d_model, d_k_in=d_model, d_v_in=d_model, d_atn=d_atn, d_v=d_v,
                                       d_out=d_model, dropout_rate=dropout_rate)
         self.ffn = FFN(d_model=d_model, d_ff=d_intermediate)
-        self.ln_mha = LayerNorm(normalized_shape=d_model)
-        self.ln_ffn = LayerNorm(normalized_shape=d_model)
+        self.ln_mha = LayerNorm(normalized_shape=d_model, eps=1e-12)
+        self.ln_ffn = LayerNorm(normalized_shape=d_model, eps=1e-12)
         self.dropout = Dropout(dropout_rate)
 
     def forward(self, inps: Tuple[Tensor, LongTensor]) -> Tuple[Tensor, LongTensor]:
@@ -62,11 +62,11 @@ class DecoderLayer(Module):
         self.mask_mha = MultiHeadAttention(num_heads=num_heads_dec, d_q_in=d_decoder, d_k_in=d_decoder,
                                            d_v_in=d_decoder, d_atn=d_atn_dec, d_v=d_v_dec,
                                            d_out=d_decoder, dropout_rate=dropout_rate)
-        self.ln_masked_mha = LayerNorm(d_decoder)
+        self.ln_masked_mha = LayerNorm(d_decoder, eps=1e-12)
         self.mha = MultiHeadAttention(num_heads=num_heads_enc, d_q_in=d_decoder, d_k_in=d_encoder,
                                       d_v_in=d_encoder, d_atn=d_atn_enc, d_v=d_v_enc,
                                       d_out=d_decoder, dropout_rate=dropout_rate)
-        self.ln_mha = LayerNorm(d_decoder)
+        self.ln_mha = LayerNorm(d_decoder, eps=1e-12)
         self.ffn = FFN(d_model=d_decoder, d_ff=d_interm, dropout_rate=dropout_rate)
         self.ln_ffn = LayerNorm(d_decoder)
 
