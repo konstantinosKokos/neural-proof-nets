@@ -133,8 +133,8 @@ def collate_type(wordtype: WordType) -> WordType:
         return wordtype
 
 
-def main() -> Tuple[List[Sample], List[Sample], List[Sample]]:
-    with open('./train_dev_test.p', 'rb') as f:
+def main(data_path: str = './train_dev_test.p') -> Tuple[List[Sample], List[Sample], List[Sample]]:
+    with open(data_path, 'rb') as f:
         dataset = pickle.load(f)
         train, dev, test = convert_dataset(dataset)
 
