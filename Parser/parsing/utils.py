@@ -205,7 +205,7 @@ class TypeParser(object):
             -> Optional[Tuple[strs, Atoms, List[ints], List[ints], IntMapping]]:
         if sent is None:
             return None
-        if not invariance_check(sent[1:], sent[0]):
+        if not invariance_check([wt for wt in sent[1:] if wt != MWU], sent[0]):
             return None
         atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, sent[1:])))))
         negative, positive = list(map(lambda x: reduce(add, x), atoms))
