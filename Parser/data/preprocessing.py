@@ -3,6 +3,7 @@ from itertools import chain
 from operator import add
 from typing import Dict, Optional
 
+from Parser.data.convert_aethel import convert_dataset
 from Parser.data.constants import PtDict, CatDict
 from Parser.data.sample import *
 from Parser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
@@ -53,7 +54,8 @@ def get_conclusion(_atoms: List[Tuple[AtomicType, int]], _proof: ProofNet) -> Tu
     return conclusion_atom, conclusion_id
 
 
-def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optional[Atoms] = None) -> Sample:
+def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optional[Atoms] = None,
+               source: Optional[str] = None) -> Optional[Sample]:
     if len(types) == 1:
         return None
 
@@ -87,8 +89,7 @@ def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optiona
                             negative_sep))
 
     return Sample(words=words, matrices=matrices, positive_ids=positive_ids, negative_ids=negative_ids,
-                  polish=remove_polarities(polished),
-                  types=types, proof=proof)
+                  polish=remove_polarities(polished), types=types, proof=proof, source=source)
 
 
 def convert_matches_to_matrix(matches: Tuple[ints, ints], proof: ProofNet) -> Matrix:
@@ -133,23 +134,21 @@ def collate_type(wordtype: WordType) -> WordType:
 
 
 def main() -> Tuple[List[Sample], List[Sample], List[Sample]]:
-    with open('./maximal.p', 'rb') as f:
-        train, dev, test = pickle.load(f)
-        trainwords, traintypes, trainproofs = train
-        devwords, devtypes, devproofs = dev
-        testwords, testtypes, testproofs = test
+    with open('./train_dev_test.p', 'rb') as f:
+        dataset = pickle.load(f)
+        train, dev, test = convert_dataset(dataset)
 
     trainsamples = list(filter(lambda x: x is not None,
-                               map(lambda w, t, p: preprocess(w, t, p, _atom_set),
-                                   trainwords, traintypes, trainproofs)))
+                               map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
+                                   train)))
     devsamples = list(filter(lambda x: x is not None,
-                             map(lambda w, t, p: preprocess(w, t, p, _atom_set),
-                                 devwords, devtypes, devproofs)))
+                             map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
+                                 dev)))
     testsamples = list(filter(lambda x: x is not None,
-                              map(lambda w, t, p: preprocess(w, t, p, _atom_set),
-                                  testwords, testtypes, testproofs)))
+                              map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
+                                  test)))
 
-    with open('./processed.p', 'wb') as f:
+    with open('./processed_new.p', 'wb') as f:
         pickle.dump((trainsamples, devsamples, testsamples), f)
         print('Saved pre-processed samples.')
         return trainsamples, devsamples, testsamples

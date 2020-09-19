@@ -1,6 +1,6 @@
 import pickle
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, Optional
 from Parser.parsing.milltypes import WordTypes
 
 ProofNet = Set[Tuple[int, int]]
@@ -19,6 +19,7 @@ class Sample:
     polish: strs
     types: WordTypes
     proof: ProofNet
+    source: Optional[str]
 
     def __hash__(self) -> int:
         words = tuple(self.words).__hash__()
