@@ -148,7 +148,7 @@ def main() -> Tuple[List[Sample], List[Sample], List[Sample]]:
                               map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
                                   test)))
 
-    with open('./processed_new.p', 'wb') as f:
+    with open('./processed.p', 'wb') as f:
         pickle.dump((trainsamples, devsamples, testsamples), f)
         print('Saved pre-processed samples.')
         return trainsamples, devsamples, testsamples
