@@ -1,17 +1,17 @@
 # neural-roof-nets
 ## About
-Code for the paper Neural Proof Nets
+Code for the paper Neural Proof Nets.
 
 ## Usage
 
-### Requirements
-Python 3.8
+### Installation
+Python 3.8+
 
-For package dependencies, see `requirements.txt`
+Clone the project locally. In a clean python venv do `pip install -r requirements.txt`
 
 ### Inference
 To run the model in inference mode:
-1. Download pretrained weights from [here](https://surfdrive.surf.nl/files/index.php/s/EuUqRp3VYLBmoBk)
+1. Download pretrained weights from [here](https://surfdrive.surf.nl/files/index.php/s/Af9P4PsZ1qEv04N)
 2. Unzip the downloaded file, and place its contents in a directory `stored_models`, alongside `Parser`.
 Your resulting directory structure should look like:
 
@@ -38,10 +38,9 @@ Your resulting directory structure should look like:
 
 #### Evaluation
 To evaluate on the test set data, follow steps 1 and 2 of the previous paragraph. You will also need a binary version of 
-the processed dataset.
+the processed dataset, placed in the outermost project directory.
  
-1. You can download a preprocessed version [here](https://surfdrive.surf.nl/files/index.php/s/7w8EbLx08JEogq4), placed 
-on the outermost directory. 
+1. You can download a preprocessed version [here](https://surfdrive.surf.nl/files/index.php/s/7w8EbLx08JEogq4). 
     * Alternatively, you can convert the [original dataset](https://github.com/konstantinosKokos/aethel) into the parser
      format yourself by running the script in `Parser.data.convert_aethel` (additionally requires a local clone of the 
      [extraction code](https://github.com/konstantinosKokos/Lassy-TLG-extraction)).
