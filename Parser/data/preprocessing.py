@@ -1,9 +1,8 @@
 from functools import reduce
 from itertools import chain
 from operator import add
-from typing import Dict, Optional
+from typing import Dict
 
-from Parser.data.convert_aethel import convert_dataset
 from Parser.data.constants import PtDict, CatDict
 from Parser.data.sample import *
 from Parser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
@@ -131,24 +130,3 @@ def collate_type(wordtype: WordType) -> WordType:
         wordtype.argument = collate_type(wordtype.argument)
         wordtype.result = collate_type(wordtype.result)
         return wordtype
-
-
-def main(data_path: str = './train_dev_test.p') -> Tuple[List[Sample], List[Sample], List[Sample]]:
-    with open(data_path, 'rb') as f:
-        dataset = pickle.load(f)
-        train, dev, test = convert_dataset(dataset)
-
-    trainsamples = list(filter(lambda x: x is not None,
-                               map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
-                                   train)))
-    devsamples = list(filter(lambda x: x is not None,
-                             map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
-                                 dev)))
-    testsamples = list(filter(lambda x: x is not None,
-                              map(lambda x: preprocess(x[0], x[1], x[2], _atom_set, x[3]),
-                                  test)))
-
-    with open('./processed.p', 'wb') as f:
-        pickle.dump((trainsamples, devsamples, testsamples), f)
-        print('Saved pre-processed samples.')
-        return trainsamples, devsamples, testsamples
