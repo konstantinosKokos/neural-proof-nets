@@ -1,6 +1,6 @@
 # neural-roof-nets
 ## About
-Code for the paper Neural Proof Nets.
+Code for the paper Neural Proof Nets ([2009.12702](https://arxiv.org/abs/2009.12702)).
 
 ## Usage
 
