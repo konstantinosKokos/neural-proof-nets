@@ -29,12 +29,21 @@ Your resulting directory structure should look like:
     ```
 3. Run a python console from your working directory, and run:
     ```
-    from Parser.neural.inference import get_model
-    model = get_model(device)
-    analyses = model.infer(xs, n)
+    >>> from Parser.neural.inference import get_model
+    >>> model = get_model(device)
+    >>> analyses = model.infer(xs, n)
     ```
     where `device` is either `"cpu"` or `"cuda"`, `xs` a list of strings to parse and `n` the beam size.
-    For manipulating analyses, refer to the `Analysis` class in `Parser.parsing.utils`
+    `analyses` will be a list (one item per input string) of lists (one item per beam) of 
+    [Analysis](https://github.com/konstantinosKokos/neural-proof-nets/blob/ed8c13372bb5039e762030fe6b01129976094a9b/Parser/parsing/utils.py#L21) objects.
+    The key property of interest is `lambda_term`, which contains the 
+    λ-term derived from the sentence, if parsing was error-free, as in the example below:
+    ```
+    >>> sent = "Wat is de lambda-term van dit voorbeeld?"
+    >>> term = model.infer([sent], 1)[0][0].lambda_term 
+    >>> print(term)
+    (Wat::(ᴠɴᴡ → sᴠ1) → ᴡʜǫ λx₀.((is::ᴠɴᴡ → ɴᴘ → sᴠ1 x₀ᵖʳᵉᵈᶜ) ((van::ɴᴘ → ɴᴘ → ɴᴘ (dit::ɴ → ɴᴘᵈᵉᵗ  voorbeeld?::ɴ)ᵒᵇʲ¹)ᵐᵒᵈ (de::ɴ → ɴᴘᵈᵉᵗ  lambda-term::ɴ))ˢᵘ)ʷʰᵈ_ᵇᵒᵈʸ)
+    ```
 
 #### Evaluation
 To evaluate on the test set data, follow steps 1 and 2 of the previous paragraph. You will also need a binary version of 
@@ -62,8 +71,8 @@ the processed dataset, placed in the outermost project directory.
     ```
 2. Open a python console and run 
     ```
-    from Parser.neural.evaluation import fill_table
-    results = fill_table(bs)
+    >>> from Parser.neural.evaluation import fill_table
+    >>> results = fill_table(bs)
     ``` 
     where `bs` the list of beam sizes (ints) to test with. Note that this runs a single model instead of averaging, so 
     a small variation to the paper reported numbers is to be expected.
