@@ -65,7 +65,7 @@ the processed dataset, placed in the outermost project directory.
         +--__init__.py
     +---stored_models
         +--model_weights.p
-    +---processed.p
+    +--processed.p
     +--README.md
     +--requirements.txt
     ```
