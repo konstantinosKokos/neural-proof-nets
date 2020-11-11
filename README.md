@@ -16,14 +16,14 @@ To run the model in inference mode:
 Your resulting directory structure should look like:
 
     ```
-    +---Parser
-        +--data
-        +--neural
-        +--parsing
-        +--train.py
-        +--__init__.py
-    +---stored_models
-        +--model_weights.p
+    +--Parser
+       +--data
+       +--neural
+       +--parsing
+       +--train.py
+       +--__init__.py
+    +--stored_models
+       +--model_weights.p
     +--README.md
     +--requirements.txt
     ```
@@ -57,15 +57,15 @@ the processed dataset, placed in the outermost project directory.
     Your directory structure should look like:
 
     ```
-    +---Parser
-        +--data
-        +--neural
-        +--parsing
-        +--train.py
-        +--__init__.py
-    +---stored_models
-        +--model_weights.p
-    +---processed.p
+    +--Parser
+       +--data
+       +--neural
+       +--parsing
+       +--train.py
+       +--__init__.py
+    +--stored_models
+       +--model_weights.p
+    +--processed.p
     +--README.md
     +--requirements.txt
     ```
