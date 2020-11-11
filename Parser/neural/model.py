@@ -27,7 +27,7 @@ class Parser(Module):
         self.dec_heads = 8
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
-        self.word_encoder = BertModel.from_pretrained("wietsedv/bert-base-dutch-cased").to(device)
+        self.word_encoder = BertModel.from_pretrained("pdelobelle/robbert-v2-dutch-base").to(device)
         self.supertagger = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
