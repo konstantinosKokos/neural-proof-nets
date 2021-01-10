@@ -3,10 +3,11 @@ from typing import *
 
 from torch.optim import Optimizer
 
-from torch.utils.data import Dataset, DataLoader
-from torch import Tensor, LongTensor
-from Parser.data.sample import Sample
-from Parser.neural.utils import batchify_vectorized_samples, Item, Batch
+from torch.utils.data.dataset import Dataset
+from torch.utils.data.dataloader import DataLoader
+
+from ..data.preprocessing import Sample
+from ..neural.utils import batchify_vectorized_samples, Item
 
 
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:

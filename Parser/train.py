@@ -4,8 +4,8 @@ import sys
 
 from torch.nn import KLDivLoss
 
-from Parser.data.sample import load_stored
-from Parser.neural.model import *
+from .data.preprocessing import load_stored
+from .neural.model import *
 from Parser.neural.schedules import *
 from Parser.neural.utils import *
 

@@ -1,107 +1,57 @@
-from functools import reduce
+"""
+Contains utility functions to convert the aethel dataset to inputs for the neural proof net.
+"""
+
+from dataclasses import dataclass
+
 from itertools import chain
+from functools import reduce
 from operator import add
-from typing import Dict
 
-from Parser.data.constants import PtDict, CatDict
-from Parser.data.sample import *
-from Parser.parsing.milltypes import (WordType, AtomicType, get_polarities_and_indices, polish,
-                                      PolarizedType)
+from LassyExtraction.aethel import ProofNet, AxiomLinks
+from LassyExtraction.milltypes import WordType, Optional, AtomicType, polish, FunctorType, get_polarities_and_indices
+from LassyExtraction.extraction import CatDict, PtDict, ModDeps
 
-
-Atoms = List[AtomicType]
 MWU = AtomicType('_MWU')
 
-# _atom_collations = {'N': 'NP', 'VNW': 'NP', 'SPEC': 'NP', 'ADJ': 'AP'}
 _atom_collations = {'SPEC': 'NP'}
-# _atom_collations = dict()
 
 
-def make_atom_set() -> Atoms:
-    atomset = set(PtDict.values()).union(set(CatDict.values())).union({MWU}).difference(
-        set(map(AtomicType, _atom_collations.keys()))
-    )
-    return sorted(atomset, key=lambda x: str(x))
+def make_atom_set() -> list[AtomicType]:
+    pts = set(PtDict.values())
+    cats = set(CatDict.values())
+    rem = set(map(AtomicType, _atom_collations.keys()))
+    return sorted(pts.union(cats).difference(rem).union({MWU}), key=lambda a: str(a))
 
 
 _atom_set = make_atom_set()
 
 
-def polish_fn(types: List[WordType], sos_symbol: str = '[SOS]', sep_symbol: str = '[SEP]') -> strs:
-    return [sos_symbol] + f' {sep_symbol} '.join(map(polish, types)).split() + [sep_symbol]
+def polish_seq(types: list[WordType], sos: str = '[SOS]', sep: str = '[SEP]') -> list[str]:
+    return [sos] + f' {sep} '.join(map(polish, types)).split() + [sep]
 
 
-def preprocess_pairs(words: strs, types: List[WordType]) -> Tuple[strs, List[WordType]]:
-    words = [word.split() for word in words]
-    types = [[wordtype] + [MWU for _ in range(len(words[i]) - 1)] for i, wordtype in enumerate(types)]
+def pad_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list[WordType]]:
+    words = [w.split() for w in words]
+    types = [[wt] + [MWU] * (len(w)-1) for w, wt in zip(words, types)]
     return list(chain.from_iterable(words)), list(chain.from_iterable(types))
 
 
-def sep(_atoms: List[Tuple[AtomicType, int]], atom_set: Atoms) -> List[List[Tuple[AtomicType, int]]]:
-    return [list(filter(lambda p: p[0] == a, _atoms)) for a in atom_set]
+def separate(atoms: list[tuple[AtomicType, int]], atom_set: list[AtomicType]) -> list[list[tuple[AtomicType, int]]]:
+    return [list(filter(lambda p: p[0] == a, atoms)) for a in atom_set]
 
 
-def get_conclusion(_atoms: List[Tuple[AtomicType, int]], _proof: ProofNet) -> Tuple[AtomicType, int]:
-    antecedents = set(map(lambda x: x[1], _atoms))
-    conclusion_id = list(set(map(lambda x: x[1],
-                                 _proof)).
-                         union(set(map(lambda x: x[0],
-                                       _proof))).
-                         difference(antecedents))[0]
-    conclusion_pair = list(filter(lambda pair: pair[1] == conclusion_id, _proof))[0][0]
-    conclusion_atom = list(filter(lambda a: a[1] == conclusion_pair, _atoms))[0][0]
-    return conclusion_atom, conclusion_id
-
-
-def preprocess(words: strs, types: WordTypes, proof: ProofNet, atom_set: Optional[Atoms] = None,
-               source: Optional[str] = None) -> Optional[Sample]:
-    if len(types) == 1:
-        return None
-
-    if atom_set is None:
-        atom_set = _atom_set
-
-    types = list(map(collate_type, types))
-
-    words, types = preprocess_pairs(words, types)
-
-    atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types)))))
-    negative, positive = list(map(lambda x: reduce(add, x), atoms))
-
-    conclusion = get_conclusion(positive + negative, proof)
-    negative += [conclusion]
-
-    positive_sep = sep(positive, atom_set)
-    negative_sep = sep(negative, atom_set)
-
-    matrices = list(map(lambda x: convert_matches_to_matrix(x, proof),
-                        list(zip(
-                            list(map(lambda _sep: [item[1] for item in _sep], positive_sep)),
-                            list(map(lambda _sep: [item[1] for item in _sep], negative_sep))))))
-
-    polished = polish_fn([PolarizedType(wordtype=str(conclusion[0]), polarity=False, index=conclusion[1])] + types)
-    positional_ids = index_from_polish(polished, offset=0)
-
-    positive_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
-                            positive_sep))
-    negative_ids = list(map(lambda idxs: list(map(lambda atom: positional_ids[atom[1]], idxs)),
-                            negative_sep))
-
-    return Sample(words=words, matrices=matrices, positive_ids=positive_ids, negative_ids=negative_ids,
-                  polish=remove_polarities(polished), types=types, proof=proof, source=source)
-
-
-def convert_matches_to_matrix(matches: Tuple[ints, ints], proof: ProofNet) -> Matrix:
+def convert_matches_to_matrix(matches: tuple[list[int], list[int]], links: AxiomLinks) -> list[list[bool]]:
     def is_match(_i: int, _j: int) -> bool:
-        return (_i, _j) in proof
-
+        return (_i, _j) in links
     return [[is_match(i, j) for j in matches[1]] for i in matches[0]]
 
 
-def index_from_polish(polished: List[str], offset: int) -> Dict[int, int]:
-    def is_atom(x: str) -> bool:
-        return '(' in x
+def is_atom(x: str) -> bool:
+    return '(' in x
 
+
+def idx_from_polish(polished: list[str], offset: int) -> dict[int, int]:
     def get_idx(x: str) -> int:
         return int(x.split(',')[1].split(')')[0])
 
@@ -109,24 +59,71 @@ def index_from_polish(polished: List[str], offset: int) -> Dict[int, int]:
 
 
 def remove_polarity(indexed: str) -> str:
-    return indexed if '(' not in indexed else indexed.split('(')[0]
+    return indexed if not is_atom(indexed) else indexed.split('(')[0]
 
 
-def remove_polarities(indexed: strs) -> strs:
-    return list(map(remove_polarity, indexed))
+def remove_polarities(indexed: list[str]) -> list[str]:
+    return [remove_polarity(i) for i in indexed]
 
 
 def collate_atom(atom: str) -> str:
-    if atom in _atom_collations.keys():
-        return _atom_collations[atom]
-    return atom
+    return _atom_collations[atom] if atom in _atom_collations.keys() else atom
 
 
 def collate_type(wordtype: WordType) -> WordType:
     if isinstance(wordtype, AtomicType):
         wordtype.type = collate_atom(wordtype.type)
         return wordtype
-    else:
-        wordtype.argument = collate_type(wordtype.argument)
-        wordtype.result = collate_type(wordtype.result)
+    elif isinstance(wordtype, FunctorType):
+        collate_type(wordtype.argument)
+        collate_type(wordtype.result)
         return wordtype
+
+
+@dataclass
+class Sample:
+    words: list[str]
+    types: list[WordType]
+    matrices: list[list[list[bool]]]
+    pos_ids: list[list[int]]
+    neg_ids: list[list[int]]
+    polish: list[str]
+    proof: AxiomLinks
+    name: Optional[str]
+
+    @staticmethod
+    def from_proofnet(pn: ProofNet) -> 'Sample':
+
+        words = pn.proof_frame.get_words()
+        types = list(map(collate_type, pn.proof_frame.get_types()))
+        words, types = pad_mwus(words, types)
+
+        atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types)))))
+        negative, positive = list(map(lambda x: reduce(add, x), atoms))
+        conclusion = pn.proof_frame.conclusion
+        negative += [(conclusion, pn.proof_frame.conclusion.index)]
+
+        p_sep = separate(positive, _atom_set)
+        n_sep = separate(negative, _atom_set)
+
+        matrices = list(map(lambda x: convert_matches_to_matrix(x, pn.axiom_links),
+                            list(zip(
+                                list(map(lambda _sep: [item[1] for item in _sep], p_sep)),
+                                list(map(lambda _sep: [item[1] for item in _sep], n_sep))))))
+
+        polished = polish_seq([conclusion] + types)
+        p_to_ids = idx_from_polish(polished, 0)
+        pos_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), p_sep))
+        neg_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), n_sep))
+        return Sample(words, types, matrices, pos_ids, neg_ids, polished, pn.axiom_links, pn.name)
+
+    @staticmethod
+    def from_dataset(dataset: list[list[ProofNet]]) -> list[list['Sample']]:
+        return [[Sample.from_proofnet(pn) for pn in pns] for pns in dataset]
+
+
+def load_stored(file: str = './processed.p') -> tuple[list[Sample], list[Sample], list[Sample]]:
+    import pickle
+    with open(file, 'rb') as f:
+        print('Opening pre-processed samples.')
+        return pickle.load(f)

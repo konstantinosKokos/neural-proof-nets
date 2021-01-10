@@ -23,3 +23,4 @@ tqdm==4.47.0
 transformers==3.0.1
 urllib3==1.25.9
 wget==3.2
+git+git://github.com/konstantinosKokos/lassy-tlg-extraction@0.3.dev1#egg=LassyExtraction
