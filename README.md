@@ -5,7 +5,7 @@ Code for the paper Neural Proof Nets ([2009.12702](https://arxiv.org/abs/2009.12
 ## Usage
 
 ### Installation
-Python 3.8+
+Python 3.9+
 
 Clone the project locally. In a clean python venv do `pip install -r requirements.txt`
 
