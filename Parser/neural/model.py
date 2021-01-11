@@ -487,47 +487,46 @@ class Parser(Module):
 
         return analyses
 
-    # todo
+    @torch.no_grad()
+    def parse_with_oracle(self, samples: list[Sample]) -> list[list[Analysis]]:
+        self.eval()
 
-    # @torch.no_grad()
-    # def parse_with_oracle(self, samples: list[Sample]) -> List[List[Analysis]]:
-    #     self.eval()
-    #
-    #     sent_lens = list(map(lambda s: len(s.words) + 1, samples))
-    #     words, types, pos_ids, neg_ids = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
-    #
-    #     tmp = self.precode(words, types)
-    #     encoder_output, atom_embeddings, decoder_mask, wmask_ = tmp
-    #     type_preds = [[x] for x in types.tolist()]
-    #     atom_embeddings = atom_embeddings.unsqueeze(1)
-    #     atom_seqs: List[List[Optional[List[strs]]]]
-    #     # filter decoded atoms that count at least as many types as words
-    #     atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
-    #
-    #     analyses = self.type_parser.analyze_beam_batch([' '.join(s.words) for s in samples], atom_seqs)
-    #     valid_for_linking = [((s, b), len(analyses[s][b].polish), analyses[s][b])
-    #                          for s in range(len(analyses))
-    #                          for b in range(len(analyses[s]))
-    #                          if analyses[s][b].polish is not None]
-    #     if not valid_for_linking:
-    #         return analyses
-    #
-    #     ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
-    #     atom_mask = self.make_atom_mask_from_lens(atom_lens)
-    #
-    #     atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
-    #     word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
-    #     wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
-    #     for i, (s, b) in enumerate(ids):
-    #         atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
-    #         word_reprs[i] = encoder_output[s]
-    #         wmask[i] = wmask_[s]
-    #
-    #     positive_ids, negative_ids = self.type_parser.analyses_to_indices(valid_analyses)
-    #
-    #     links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
-    #
-    #     links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
-    #     for va, link in zip(valid_analyses, links):
-    #         va.fill_matches(link)
-    #     return analyses
+        sent_lens = list(map(lambda s: len(s.words) + 1, samples))
+        words, types, pos_ids, neg_ids = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
+
+        tmp = self.precode(words, types)
+        encoder_output, atom_embeddings, decoder_mask, wmask_ = tmp
+        type_preds = [[x] for x in types.tolist()]
+        atom_embeddings = atom_embeddings.unsqueeze(1)
+        atom_seqs: list[list[Optional[list[list[str]]]]]
+        # filter decoded atoms that count at least as many types as words
+        atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
+
+        analyses = self.type_parser.parse_beam_batch([' '.join(s.words) for s in samples], atom_seqs)
+        valid_for_linking = [((s, b), len(analyses[s][b].polish), analyses[s][b])
+                             for s in range(len(analyses))
+                             for b in range(len(analyses[s]))
+                             if analyses[s][b].valid()]
+        if not valid_for_linking:
+            return analyses
+
+        ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
+        atom_mask = self.make_atom_mask_from_lens(atom_lens)
+
+        atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
+        word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
+        wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
+        for i, (s, b) in enumerate(ids):
+            atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
+            word_reprs[i] = encoder_output[s]
+            wmask[i] = wmask_[s]
+
+        positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
+        weights_, links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
+
+        weights = [[w.tolist()[0] for w in sent] for sent in weights_]
+        links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
+        for va, weight, link in zip(valid_analyses, weights, links):
+            va.link_weights = weight
+            va.fill_matches(link)
+        return analyses
