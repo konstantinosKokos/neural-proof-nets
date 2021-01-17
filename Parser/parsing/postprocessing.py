@@ -12,7 +12,6 @@ from typing import Dict, Optional
 from torch import Tensor
 
 
-
 class ParseError(Exception):
     def __init__(self, message: str):
         super(ParseError, self).__init__(message)

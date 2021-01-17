@@ -5,15 +5,15 @@ import torch
 from torch import Tensor, LongTensor
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence as _pad_sequence
-from transformers import BertTokenizer
+from transformers import RobertaTokenizer
 
 from ..data.preprocessing import Sample
 
 
 class Tokenizer:
     def __init__(self):
-        self.core = BertTokenizer.from_pretrained('wietsedv/bert-base-dutch-cased')
-        # self.core = RobertaTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
+        # self.core = BertTokenizer.from_pretrained('wietsedv/bert-base-dutch-cased', use_fast=True)
+        self.core = RobertaTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
 
     def encode_sample(self, sample: Sample) -> list[int]:
         return self.core.encode(' '.join(sample.words))
@@ -198,8 +198,8 @@ def make_permutors(matrices: list[list[list[list[bool]]]], max_difficulty: int, 
     def tensorize_matrix(matrix: list[list[bool]]) -> Tensor:
         return LongTensor(matrix).argmax(dim=-1)
 
-    permutors = list(filter(lambda matrix: matrix, chain.from_iterable(matrices)))
-    distinct_shapes = set(map(lambda permutor: len(permutor), permutors))
+    permutors = [matrix for matrix in chain.from_iterable(matrices) if matrix]
+    distinct_shapes = {len(permutor) for permutor in permutors}
     if exclude_singular:
         distinct_shapes = distinct_shapes.difference({1})
     distinct_shapes = sorted(distinct_shapes)
@@ -208,10 +208,8 @@ def make_permutors(matrices: list[list[list[list[bool]]]], max_difficulty: int, 
     for shape in distinct_shapes:
         if shape > max_difficulty:
             break
-        this_shape_permutors = list(filter(lambda permutor: len(permutor) == shape, permutors))
-        grouped_permutors.append(torch.stack(list(map(lambda permutor:
-                                                      tensorize_matrix(permutor),
-                                                      this_shape_permutors))))
+        this_shape_permutors = [permutor for permutor in permutors if len(permutor) == shape]
+        grouped_permutors.append(torch.stack([tensorize_matrix(matrix) for matrix in this_shape_permutors]))
 
     return grouped_permutors
 

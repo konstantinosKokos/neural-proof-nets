@@ -1,25 +1,25 @@
-from Parser.neural.model import Parser
-from Parser.parsing.utils import Analysis, sample_to_analysis
-from Parser.neural.utils import Tokenizer, AtomTokenizer, make_atom_mapping
-from Parser.data.sample import load_stored, Sample
+from ..neural.model import Parser
+from ..data.preprocessing import Sample, load_stored
+from ..parsing.postprocessing import Analysis
+from ..neural.utils import make_atom_mapping, AtomTokenizer, Tokenizer
+
 import torch
 
-from typing import List, Callable, Tuple
+from typing import Callable
 from functools import reduce
-
 from operator import eq, add
 
 
-def make_stuff() -> Tuple[Parser, List[Sample]]:
+def make_stuff() -> tuple[Parser, list[Sample]]:
     train, dev, test = load_stored('./processed.p')
     atom_map = make_atom_mapping(train+dev+test)
-    parser = Parser(AtomTokenizer(atom_map), Tokenizer(), 768, 256, 'cuda')
+    parser = Parser(AtomTokenizer(atom_map), Tokenizer(), device='cuda')
     parser.load_state_dict(torch.load('./stored_models/model_weights.p',
                                       map_location='cuda')['model_state_dict'])
-    return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
+    return parser, sorted(list(filter(lambda x: len(x.polish) < 140, test)), key=lambda x: len(x.polish))
 
 
-def infer_dataset(model: Parser, data: List[Sample], beam_size: int, batch_size: int) -> List[List[Analysis]]:
+def infer_dataset(model: Parser, data: list[Sample], beam_size: int, batch_size: int) -> list[list[Analysis]]:
     ret = []
     start_from = 0
     while start_from < len(data):
@@ -34,7 +34,7 @@ def infer_dataset(model: Parser, data: List[Sample], beam_size: int, batch_size:
     return ret
 
 
-def oracle_run(model: Parser, data: List[Sample], batch_size: int) -> List[List[Analysis]]:
+def oracle_run(model: Parser, data: list[Sample], batch_size: int) -> list[list[Analysis]]:
     ret = []
     start_from = 0
     while start_from < len(data):
@@ -45,89 +45,80 @@ def oracle_run(model: Parser, data: List[Sample], batch_size: int) -> List[List[
     return ret
 
 
-def data_to_analyses(data: List[Sample]) -> List[Analysis]:
-    return [sample_to_analysis(sample) for sample in data]
+def data_to_analyses(data: list[Sample]) -> list[Analysis]:
+    return [Analysis.from_sample(sample) for sample in data]
 
 
-# Boolean Comparisons
 def types_correct(x: Analysis, y: Analysis) -> bool:
     return x.types == y.types
 
 
-def lambdas_correct(x: Analysis, y: Analysis, check_decoration: bool) -> bool:
-    if check_decoration:
-        return x.lambda_term == y.lambda_term
-    else:
-        return x.lambda_term_no_dec == y.lambda_term_no_dec
+def term_correct(x: Analysis, y: Analysis, check_decoration: bool) -> bool:
+    y_term = y.to_proofnet().print_term(show_words=False, show_types=False, show_decorations=check_decoration)
+    try:
+        x_term = x.to_proofnet().print_term(show_words=False, show_types=False, show_decorations=check_decoration)
+        return x_term == y_term
+    except TypeError:
+        return False
 
 
-def not_failed(x: Analysis, y: Analysis) -> bool:
-    return x.types is not None and x.conclusion is not None
+def passing(x: Analysis) -> bool:
+    return x.traceback is None
 
 
-def invariance(x: Analysis, y: Analysis) -> bool:
-    return x.positive_ids is not None and x.negative_ids is not None
+def invariance(x: Analysis) -> bool:
+    return x.valid()
 
 
-def match_in_beam(beam: List[Analysis], correct: Analysis,
-                  comparison: Callable[[Analysis, Analysis], bool]) -> bool:
-    return any(list(map(lambda x: comparison(x, correct), beam)))
+def match_in_beam(beam: list[Analysis], correct: Analysis, cmp: Callable[[Analysis, Analysis], bool]) -> bool:
+    return any((cmp(x, correct) for x in beam))
 
 
-def matches_in_beams(beams: List[List[Analysis]], corrects: List[Analysis],
-                     comparison: Callable[[Analysis, Analysis], bool]) -> int:
+def matches_in_beams(beams: list[list[Analysis]], corrects: list[Analysis],
+                     cmp: Callable[[Analysis, Analysis], bool]) -> int:
     return len(list(filter(lambda equal: equal,
-                           map(lambda beam, correct: match_in_beam(beam, correct, comparison),
-                               beams,
-                               corrects))))
+                           (match_in_beam(beam, correct, cmp) for beam, correct in zip(beams, corrects)))))
 
 
-def measure_lambda_accuracy(beams: List[List[Analysis]], corrects: List[Analysis], check_decorations: bool) -> float:
+def measure_lambda_accuracy(beams: list[list[Analysis]], corrects: list[Analysis], check_decorations: bool) -> float:
     if check_decorations:
-        comp = lambda x, y: lambdas_correct(x, y, True)
+        comp = lambda x, y: term_correct(x, y, True)
     else:
-        comp = lambda x, y: lambdas_correct(x, y, False)
+        comp = lambda x, y: term_correct(x, y, False)
     return matches_in_beams(beams, corrects, comp) / len(beams)
 
 
-def measure_typing_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
+def measure_typing_accuracy(beams: list[list[Analysis]], corrects: list[Analysis]) -> float:
     return matches_in_beams(beams, corrects, types_correct) / len(beams)
 
 
-def measure_non_failed(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
-    return matches_in_beams(beams, corrects, not_failed)
+def measure_coverage(beams: list[list[Analysis]]) -> float:
+    return len(list(filter(lambda beam: any(map(passing, beam)), beams))) / len(beams)
 
 
-def measure_inv_correct(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
-    return matches_in_beams(beams, corrects, invariance)
+def measure_inv_correct(beams: list[list[Analysis]]) -> float:
+    return len(list(filter(lambda beam: any(map(invariance, beam)), beams))) / len(beams)
 
 
-# Float Comparisons
-def token_accuracy(x: Analysis, y: Analysis) -> Tuple[int, int]:
-    if x.types is None or x.conclusion is None:
-        return 0, len(y.types) + 1
-    return (len(list(filter(lambda equal: equal,
-                            map(lambda pred, true: eq(pred, true),
-                                [t.depolarize() for t in x.types + [x.conclusion]],
-                                [t.depolarize() for t in y.types + [y.conclusion]])))),
-            len(x.types) + 1)
+def token_accuracy(x: Analysis, y: Analysis) -> tuple[int, int]:
+    if x.types is None:
+        return 0, len(y.types)
+    return len(list(filter(lambda pt: eq(*pt), zip(x.types, y.types)))), len(y.types)
 
 
-def best_in_beam(beam: List[Analysis], correct: Analysis, comp: Callable[[Analysis, Analysis], Tuple[int, int]])  \
-        -> Tuple[int, int]:
-    if not len(beam):
-        return token_accuracy(None, correct)
+def best_in_beam(beam: list[Analysis], correct: Analysis, comp: Callable[[Analysis, Analysis], tuple[int, int]])  \
+        -> tuple[int, int]:
     return max(list(map(lambda x: comp(x, correct), beam)))
 
 
-def measure_token_accuracy(beams: List[List[Analysis]], corrects: List[Analysis]) -> float:
+def measure_token_accuracy(beams: list[list[Analysis]], corrects: list[Analysis]) -> float:
     best, total = list(zip(*list(map(lambda beam, correct:
                                      best_in_beam(beam, correct, token_accuracy),
                                      beams, corrects))))
     return reduce(add, best) / reduce(add, total)
 
 
-def fill_table(kappas: List[int]) -> None:
+def fill_table(kappas: list[int]) -> None:
     parser, data = make_stuff()
 
     truths = data_to_analyses(data)
@@ -136,9 +127,9 @@ def fill_table(kappas: List[int]) -> None:
         print(f'{k=}')
         print('=' * 64)
         predictions = infer_dataset(parser, data, k, 256)
-        ok = measure_non_failed(predictions, truths)/len(predictions)
-        print(f'{ok=}')
-        invc = measure_inv_correct(predictions, truths)/len(predictions)
+        coverage = measure_coverage(predictions)/len(predictions)
+        print(f'{coverage=}')
+        invc = measure_inv_correct(predictions)/len(predictions)
         print(f'{invc=}')
         token_acc = measure_token_accuracy(predictions, truths)
         print(f'{token_acc=}')
@@ -148,7 +139,6 @@ def fill_table(kappas: List[int]) -> None:
         print(f'{lambda_acc=}')
         lambda_dec_acc = measure_lambda_accuracy(predictions, truths, True)
         print(f'{lambda_dec_acc=}')
-    return predictions, truths
 
 
 def do_oracle_run():

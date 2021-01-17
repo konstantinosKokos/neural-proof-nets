@@ -1,22 +1,18 @@
 from typing import *
 
-from torch import Tensor, LongTensor
-from torch.nn import Module, Sequential, Linear, functional, LayerNorm, Dropout
+from torch import Tensor
+from torch.nn import Module, Sequential, Linear, LayerNorm, Dropout, GELU
 
 from Parser.neural.multi_head_atn import MultiHeadAttention
 
 
-class FFN(Module):
-    def __init__(self, d_model: int, d_ff: int, dropout_rate: float = 0.1, d_out: Optional[int] = None):
-        super(FFN, self).__init__()
-        self.linear_one = Linear(d_model, d_ff, bias=True)
-        self.linear_two = Linear(d_ff, d_model, bias=True) if d_out is None else Linear(d_ff, d_out)
-        self.dropout = Dropout(dropout_rate)
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = functional.gelu(self.linear_one(x))
-        x = self.dropout(x)
-        return self.linear_two(x)
+def FFN(d_model: int, d_ff: int, dropout_rate: float = 0.1, d_out: Optional[int] = None) -> Module:
+    return Sequential(
+        Linear(d_model, d_ff, bias=True),
+        GELU(),
+        Dropout(dropout_rate),
+        Linear(d_ff, d_model if d_out is None else d_out)
+    )
 
 
 class EncoderLayer(Module):
@@ -32,7 +28,7 @@ class EncoderLayer(Module):
         self.ln_ffn = LayerNorm(normalized_shape=d_model, eps=1e-12)
         self.dropout = Dropout(dropout_rate)
 
-    def forward(self, inps: Tuple[Tensor, LongTensor]) -> Tuple[Tensor, LongTensor]:
+    def forward(self, inps: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
         encoder_input, encoder_mask = inps
 
         encoder_input = self.dropout(encoder_input)
@@ -70,16 +66,36 @@ class DecoderLayer(Module):
         self.ffn = FFN(d_model=d_decoder, d_ff=d_interm, dropout_rate=dropout_rate)
         self.ln_ffn = LayerNorm(d_decoder)
 
-    def forward(self, inps: Tuple[Tensor, LongTensor, Tensor, LongTensor]) \
-            -> Tuple[Tensor, LongTensor, Tensor, LongTensor]:
-        encoder_out, encoder_mask, decoder_in, decoder_mask = inps
+    @overload
+    def forward(self, inps: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
+        pass
 
-        t = decoder_in.shape[1]
+    @overload
+    def forward(self, inps: tuple[Tensor, Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        pass
+
+    def forward(self, inps):
+        if len(inps) == 2:
+            return self.forward_as_encoder(inps)
+        else:
+            return self.forward_as_decoder(inps)
+
+    def forward_as_encoder(self, inps: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
+        decoder_in, decoder_mask = inps
 
         x_drop = self.dropout(decoder_in)
         dec_atn = self.mask_mha(x_drop, x_drop, x_drop, decoder_mask)
         dec_atn = dec_atn + x_drop
         dec_atn = self.ln_masked_mha(dec_atn)
+
+        return dec_atn, decoder_mask
+
+    def forward_as_decoder(self, inps: tuple[Tensor, Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        encoder_out, encoder_mask, decoder_in, decoder_mask = inps
+
+        t = decoder_in.shape[1]
+
+        dec_atn, _ = self.forward_as_encoder((decoder_in, decoder_mask))
 
         enc_dec_atn = self.mha(dec_atn, encoder_out, encoder_out, encoder_mask[:, :t, :])
         enc_dec_atn = self.dropout(enc_dec_atn)

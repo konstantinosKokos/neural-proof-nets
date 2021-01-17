@@ -1,25 +1,24 @@
 from typing import NoReturn
 
-from torch.nn import functional, LayerNorm, Sequential, Dropout
+from torch.nn import functional, LayerNorm, Dropout, Linear, Sequential, GELU
 from torch.optim.optimizer import Optimizer
 from torch.utils.data.dataloader import DataLoader
-
-from transformers import BertModel
 
 from ..neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
 from ..neural.utils import *
 from ..neural.embedding import ComplexEmbedding
 from ..parsing.postprocessing import TypeParser, Analysis
-from ..neural.transformer import make_decoder, FFN
+from ..neural.transformer import make_decoder
+
+from transformers import RobertaModel
 
 from tqdm import tqdm
 
 
 class Parser(Module):
-    def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, enc_dim: int = 768,
-                 dec_dim: int = 256, device: str = 'cpu'):
+    def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, dec_dim: int = 64, device: str = 'cpu'):
         super(Parser, self).__init__()
-        self.enc_dim = enc_dim
+        self.enc_dim = 768
         self.dec_dim = dec_dim
         self.num_embeddings = len(atokenizer)
         self.device = device
@@ -31,8 +30,9 @@ class Parser(Module):
         self.dec_heads = 8
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
-        self.word_encoder = BertModel.from_pretrained('wietsedv/bert-base-dutch-cased').to(device)
-        self.supertagger = make_decoder(num_layers=3, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
+        self.word_encoder = RobertaModel.from_pretrained("pdelobelle/robbert-v2-dutch-base").to(device)
+        # self.word_encoder = BertModel.from_pretrained('wietsedv/bert-base-dutch-cased').to(device)
+        self.supertagger = make_decoder(num_layers=6, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
                                         d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
@@ -43,17 +43,8 @@ class Parser(Module):
                                    d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
                                    d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
                                    d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
-        self.pos_transformation = Sequential(
-            FFN(d_model=self.dec_dim, d_ff=self.dec_dim, d_out=32),
-            LayerNorm(32)).to(device)
-        self.neg_transformation = Sequential(
-            FFN(d_model=self.dec_dim, d_ff=self.dec_dim, d_out=32),
-            LayerNorm(32)).to(device)
-
-        self.freeze_encoder()
-        self.unfrozen_blocks = set(range(12))
-        for block in self.unfrozen_blocks:
-            self.unfreeze_encoder_block(block)
+        self.pos_transformation = LayerNorm(self.dec_dim).to(device)
+        self.neg_transformation = LayerNorm(self.dec_dim).to(device)
 
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
@@ -62,35 +53,13 @@ class Parser(Module):
     def sinkhorn(x: Tensor, iters: int, tau: int = 1) -> Tensor:
         return sinkhorn(x, tau=tau, iters=iters)
 
-    def freeze_encoder(self) -> None:
-        for param in self.word_encoder.parameters():
-            param.requires_grad = False
-
-    def unfreeze_encoder_block(self, block: int) -> None:
-        dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train()
-        for param in dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].parameters():
-            param.requires_grad = True
-
-    def train(self, mode: bool = True) -> None:
-        self.atom_embedder.train(mode)
-        self.supertagger.train(mode)
-        self.linker.train(mode)
-        self.dropout.train(mode)
-        self.pos_transformation.train(mode)
-        self.neg_transformation.train(mode)
-        for block in self.unfrozen_blocks:
-            dict(self.word_encoder.named_modules())[f'encoder.layer.{block}'].train(mode)
-
-    def eval(self) -> None:
-        self.train(False)
-
-    def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = torch.FloatTensor) -> 'Parser':
+    def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = torch.FloatTensor) -> Module:
         self.device = self.device if device is None else device
         return super(Parser, self).to(device=device, dtype=dtype)
 
     def make_mask(self, inps: Tensor, padding_id: int) -> Tensor:
         mask = torch.ones_like(inps)
-        mask[inps == padding_id] = 0
+        mask[inps.eq(padding_id)] = 0
         return mask.to(self.device)
 
     def make_word_mask(self, lexical_ids: Tensor) -> Tensor:
@@ -117,7 +86,7 @@ class Parser(Module):
         s_out = symbol_ids.shape[1]
 
         encoder_mask = self.make_word_mask(lexical_token_ids)
-        encoder_output = self.dropout(self.encode_words(lexical_token_ids, encoder_mask))
+        encoder_output = self.encode_words(lexical_token_ids, encoder_mask)
 
         decoder_mask = self.make_decoder_mask(b=b, n=s_out)
         atom_embeddings = self.atom_embedder(symbol_ids.to(self.device))
@@ -130,16 +99,15 @@ class Parser(Module):
         return self.atom_embedder.invert(reprs, t)
 
     def encode_words(self, lexical_token_ids: Tensor, encoder_mask: Tensor) -> Tensor:
-        encoder_output, _ = self.word_encoder(lexical_token_ids.to(self.device),
-                                              attention_mask=encoder_mask.to(self.device))
-        return encoder_output
+        out = self.word_encoder(lexical_token_ids.to(self.device), attention_mask=encoder_mask.to(self.device))
+        return self.dropout(out['last_hidden_state'])
 
     def encode_atoms(self, atom_reprs: Tensor, atom_mask: Tensor, word_reprs: Tensor, word_mask: Tensor) \
             -> Tensor:
         s_out = atom_reprs.shape[1]
         if s_out == 0:
             return atom_reprs
-        return self.linker((self.dropout(word_reprs), word_mask, atom_reprs, atom_mask))[2]
+        return self.linker((word_reprs, word_mask, atom_reprs, atom_mask))[2]
 
     def link(self, atom_reprs: Tensor, atom_mask: Tensor, word_reprs: Tensor, word_mask: Tensor,
              pos_idxes: list[list[Tensor]], neg_idxes: list[list[Tensor]], exclude_singular: bool = True,
@@ -154,7 +122,7 @@ class Parser(Module):
         positives = [tensor for tensor in chain.from_iterable(_positives) if min(tensor.size()) != 0]
         negatives = [tensor for tensor in chain.from_iterable(_negatives) if min(tensor.size()) != 0]
 
-        distinct_shapes = set(map(lambda tensor: tensor.size()[0], positives))
+        distinct_shapes = {tensor.size()[0] for tensor in positives}
         if exclude_singular:
             distinct_shapes = distinct_shapes.difference({1})
         distinct_shapes = sorted(distinct_shapes)
@@ -198,14 +166,20 @@ class Parser(Module):
             local_ws = []
             local_rs = []
             for pos, neg in sent:
-                pos = self.pos_transformation(self.dropout(pos))
-                neg = self.neg_transformation(self.dropout(neg))
+                pos = self.dropout(self.pos_transformation(pos))
+                neg = self.dropout(self.pos_transformation(neg))
                 weights = pos @ neg.transpose(-1, -2)
                 local_ws.append(weights)
                 local_rs.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ws.append(local_ws)
             ret.append(local_rs)
         return ws, ret
+
+    def encode_with_decoder(self, symbol_ids: Tensor) -> Tensor:
+        b, s_out = symbol_ids.shape
+        decoder_mask = self.make_decoder_mask(b=b, n=s_out).to(self.device)
+        atom_embeddings = self.atom_embedder.embed(symbol_ids.to(self.device), 0)
+        return self.supertagger((atom_embeddings, decoder_mask))[0]
 
     def decode_train(self, lexical_token_ids: Tensor, symbol_ids: Tensor) \
             -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -353,6 +327,17 @@ class Parser(Module):
         return (output_symbols, decoder_input, encoder_output, extended_encoder_mask,
                 decoder_output.view(b, beam_width, -1, self.dec_dim))
 
+    def pretrain_decoder_batch(self, batch: Batch, loss_fn: Module, optimizer: Optimizer) -> float:
+        self.train()
+        _, types, _, _, _ = batch
+        output_reprs = self.encode_with_decoder(types)
+        type_predictions = self.predict_atoms(output_reprs[:, :-1], 1)
+        loss = loss_fn(type_predictions.contiguous(), types[:, 1:].contiguous().to(self.device))
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        return loss.item()
+
     def train_batch(self, batch: Batch, loss_fn: Module, optimizer: Optimizer,
                     linking_weight: float = 0.5) -> tuple[float, float]:
         self.train()
@@ -410,6 +395,16 @@ class Parser(Module):
                     measure_supertagging_accuracy(type_predictions, types))
         return (0, 1), measure_supertagging_accuracy(type_predictions, types)
 
+    @torch.no_grad()
+    def preval_batch(self, batch: Batch) -> tuple[int, int]:
+        self.eval()
+
+        _, types, _, _, _ = batch
+        output_reprs = self.encode_with_decoder(types)[:, :-1]
+        type_predictions = self.predict_atoms(output_reprs, t=1).argmax(dim=-1)
+        types = types[:, 1:].to(self.device)
+        return measure_supertagging_accuracy(type_predictions, types)[1]
+
     def train_epoch(self, dataloader: DataLoader, loss_fn: Module, optimizer: Optimizer,
                     linking_weight: float = 0.5) -> tuple[float, float]:
 
@@ -419,6 +414,12 @@ class Parser(Module):
             total_l1 += l1
             total_l2 += l2
         return total_l1 / len(dataloader), total_l2 / len(dataloader)
+
+    def pretrain_decoder_epoch(self, dataloader: DataLoader, loss_fn: Module, optimizer: Optimizer) -> float:
+        loss = 0.
+        for batch in tqdm(dataloader):
+            loss += self.pretrain_decoder_batch(batch, loss_fn, optimizer)
+        return loss / len(dataloader)
 
     def eval_epoch(self, dataloader: DataLoader, link: bool = True) -> tuple[float, float, float]:
         l_total, l_correct, s_total, s_correct, w_total, w_correct = (0.1,) * 6
@@ -433,6 +434,14 @@ class Parser(Module):
             l_total += bl_total
             l_correct += bl_correct
         return s_correct / s_total, w_correct / w_total, l_correct / l_total
+
+    def preval_epoch(self, dataloader: DataLoader) -> float:
+        cor, tot = 0, 0
+        for batch in tqdm(dataloader):
+            bcor, btot = self.preval_batch(batch)
+            cor += bcor
+            tot += btot
+        return cor/tot
 
     @torch.no_grad()
     def infer(self, sents: list[str], beam_size: int, **kwargs) -> list[list[Analysis]]:
