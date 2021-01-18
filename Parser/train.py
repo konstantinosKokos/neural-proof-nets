@@ -25,7 +25,7 @@ def logprint(x: str, ostreams: list[Any]) -> None:
 def load_model(parser: Parser, load: str, **kwargs) -> tuple[int, Dict, int]:
     print('Loading model parameters...')
     temp = torch.load(load, **kwargs)
-    parser.load_state_dict(temp['model_state_dict'])
+    parser.load_state_dict(temp['model_state_dict'], strict=False)
     step_num = temp['step']
     opt_state_dict = temp['opt_state_dict']
     epoch = temp['epoch']
@@ -112,7 +112,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
     for e in range(init_epoch, decoder_epochs + tag_epochs + parse_epochs):
         validate = e % 5 == 0
         save = e % 10 == 0
-        linking_weight = 0.1 if e >= decoder_epochs + tag_epochs else 0.
+        linking_weight = 0.5 if e >= decoder_epochs + tag_epochs else 0.
 
         if save and e != init_epoch:
             print('\tSaving')
