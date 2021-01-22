@@ -8,10 +8,10 @@ from Parser.neural.multi_head_atn import MultiHeadAttention
 
 def FFN(d_model: int, d_ff: int, dropout_rate: float = 0.1, d_out: Optional[int] = None) -> Module:
     return Sequential(
-        Linear(d_model, d_ff, bias=True),
+        Linear(d_model, d_ff, bias=False),
         GELU(),
         Dropout(dropout_rate),
-        Linear(d_ff, d_model if d_out is None else d_out)
+        Linear(d_ff, d_model if d_out is None else d_out, bias=False)
     )
 
 
