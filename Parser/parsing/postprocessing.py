@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 
-from LassyExtraction.milltypes import (DiamondType, BoxType, FunctorType, polish_to_type, WordType, polarize_and_index,
-                                       AtomicType, invariance_check, get_polarities_and_indices)
+from LassyExtraction.milltypes import (polish_to_type, WordType, polarize_and_index,  AtomicType, invariance_check,
+                                       get_polarities_and_indices, unarize_polish)
 from LassyExtraction.aethel import ProofNet, ProofFrame, Premise
 
-from ..neural.utils import AtomTokenizer, tensorize_batch_indexers
-from ..data.preprocessing import ModDeps, MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus
+from ..neural.utils import tensorize_batch_indexers
+from ..data.preprocessing import MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus
 
 from typing import Dict, Optional
 
@@ -18,15 +18,10 @@ class ParseError(Exception):
 
 
 class TypeParser:
-    def __init__(self, atom_tokenizer: AtomTokenizer):
-        self.operators = {k for k in atom_tokenizer.atom_map.keys() if k.lower() == k and k != '_'}
-        self.operator_classes = {k: BoxType if k in ModDeps.union({'det'}) else DiamondType
-                                 for k in self.operators if k != '→'}
-        self.operator_classes['→'] = FunctorType
-
+    @staticmethod
     def polish_to_type(self, symbols: list[str]) -> WordType:
         try:
-            return polish_to_type(symbols, self.operators, self.operator_classes)
+            return polish_to_type(unarize_polish(symbols))
         except (AssertionError, IndexError):
             raise ParseError(f'Could not parse sequence: {symbols}')
 
