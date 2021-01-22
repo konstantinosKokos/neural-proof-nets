@@ -126,7 +126,7 @@ class Sample:
         p_to_ids = idx_from_polish(polished, 0)
         pos_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), p_sep))
         neg_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), n_sep))
-        return Sample(words, types, matrices, pos_ids, neg_ids, polished, pn.axiom_links, pn.name)
+        return Sample(words, types, matrices, pos_ids, neg_ids, remove_polarities(polished), pn.axiom_links, pn.name)
 
     @staticmethod
     def from_dataset(dataset: list[list[ProofNet]]) -> list[list['Sample']]:
