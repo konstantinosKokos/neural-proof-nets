@@ -9,8 +9,10 @@ from functools import reduce
 from operator import add
 
 from LassyExtraction.aethel import ProofNet, AxiomLinks
-from LassyExtraction.milltypes import WordType, Optional, AtomicType, polish, FunctorType, get_polarities_and_indices
+from LassyExtraction.milltypes import (WordType, AtomicType, binarize_polish, FunctorType, get_polarities_and_indices,
+                                       ModalType)
 from LassyExtraction.extraction import CatDict, PtDict, ModDeps
+from typing import Optional
 
 MWU = AtomicType('_MWU')
 
@@ -27,8 +29,12 @@ def make_atom_set() -> list[AtomicType]:
 _atom_set = make_atom_set()
 
 
+def polish(wordtype: WordType, sep: str) -> list[str]:
+    return binarize_polish(wordtype.polish()) + [sep]
+
+
 def polish_seq(types: list[WordType], sos: str = '[SOS]', sep: str = '[SEP]') -> list[str]:
-    return [sos] + f' {sep} '.join(map(polish, types)).split() + [sep]
+    return [sos] + sum([polish(t, sep) for t in types], [])
 
 
 def pad_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list[WordType]]:
@@ -78,6 +84,11 @@ def collate_type(wordtype: WordType) -> WordType:
         collate_type(wordtype.argument)
         collate_type(wordtype.result)
         return wordtype
+    elif isinstance(wordtype, ModalType):
+        collate_type(wordtype.content)
+        return wordtype
+    else:
+        raise TypeError(f'Unexpected argument {wordtype} of type {type(wordtype)}')
 
 
 @dataclass
