@@ -1,58 +1,60 @@
-[PAD]	0
-ADJ	1
-ADV	2
-AHI	3
-AP	4
-BW	5
-CP	6
-INF	7
-LET	8
-LID	9
-N	10
-NP	11
-OTI	12
-PP	13
-PPART	14
-PPRES	15
-REL	16
-SMAIN	17
-SSUB	18
-SV1	19
-SVAN	20
-TI	21
-TSW	22
-TW	23
-VG	24
-VNW	25
-VZ	26
-WHQ	27
-WHREL	28
-WHSUB	29
-WW	30
-[SEP]	31
-[SOS]	32
-_	33
-_MWU	34
-app	35
-cmp_body	36
-cnj	37
-det	38
-hdf	39
-ld	40
-me	41
-mod	42
-obcomp	43
-obj1	44
-obj2	45
-pc	46
-pobj1	47
-predc	48
-predm	49
-rhd_body	50
-se	51
-su	52
-sup	53
-svp	54
-vc	55
-whd_body	56
-→	57
+[PAD]
+[SEP]
+[SOS]
+_
+_ᴍᴡᴜ
+ssᴜʙ
+sᴍᴀɪɴ
+sᴘᴇᴄ
+sᴠ1
+sᴠᴀɴ
+ɪɴғ
+ɴ
+ɴᴘ
+ʀᴇʟ
+ʙᴡ
+ʟɪᴅ
+ʟᴇᴛ
+ᴀʜɪ
+ᴀᴅᴊ
+ᴀᴅᴠ
+ᴀᴘ
+ᴄᴘ
+ᴏᴛɪ
+ᴘᴘ
+ᴘᴘʀᴇs
+ᴘᴘᴀʀᴛ
+ᴛsᴡ
+ᴛɪ
+ᴛᴡ
+ᴠɢ
+ᴠɴᴡ
+ᴠᴢ
+ᴡʜsᴜʙ
+ᴡʜǫ
+ᴡʜʀᴇʟ
+ᴡᴡ
+→
+□ᵃᵖᵖ
+□ᵈᵉᵗ
+□ᵐᵒᵈ
+□ᵖʳᵉᵈᵐ
+◊ʰᵈᶠ
+◊ʳᵉˡᶜˡ
+◊ʷʰᵇᵒᵈʸ
+◊ˡᵈ
+◊ˢᵉ
+◊ˢᵘ
+◊ˢᵘᵖ
+◊ˢᵛᵖ
+◊ᵐᵉ
+◊ᵐᵒᵈ
+◊ᵒᵇʲ2
+◊ᵒᵇʲ¹
+◊ᵒᵇᶜᵒᵐᵖ
+◊ᵖʳᵉᵈᶜ
+◊ᵖᵒᵇʲ¹
+◊ᵖᶜ
+◊ᵛᶜ
+◊ᶜᵐᵖᵇᵒᵈʸ
+◊ᶜⁿʲ

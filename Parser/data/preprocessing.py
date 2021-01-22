@@ -10,13 +10,13 @@ from operator import add
 
 from LassyExtraction.aethel import ProofNet, AxiomLinks
 from LassyExtraction.milltypes import (WordType, AtomicType, binarize_polish, FunctorType, get_polarities_and_indices,
-                                       ModalType)
-from LassyExtraction.extraction import CatDict, PtDict, ModDeps
+                                       ModalType, smallcaps)
+from LassyExtraction.extraction import CatDict, PtDict
 from typing import Optional
 
 MWU = AtomicType('_MWU')
 
-_atom_collations = {'SPEC': 'NP'}
+_atom_collations = {smallcaps('SPEC'): smallcaps('NP')}
 
 
 def make_atom_set() -> list[AtomicType]:
@@ -129,8 +129,10 @@ class Sample:
         return Sample(words, types, matrices, pos_ids, neg_ids, remove_polarities(polished), pn.axiom_links, pn.name)
 
     @staticmethod
-    def from_dataset(dataset: list[list[ProofNet]]) -> list[list['Sample']]:
-        return [[Sample.from_proofnet(pn) for pn in pns] for pns in dataset]
+    def from_dataset(dataset: list[list[ProofNet]]) -> tuple[list[list['Sample']], list[str]]:
+        samples = [[Sample.from_proofnet(pn) for pn in pns] for pns in dataset]
+        atoms = set([t for sample in sum(samples, []) for t in sample.polish])
+        return samples, ['[PAD]'] + sorted(atoms)
 
 
 def load_stored(file: str = './processed.p') -> tuple[list[Sample], list[Sample], list[Sample]]:
