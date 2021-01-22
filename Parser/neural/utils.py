@@ -12,7 +12,6 @@ from ..data.preprocessing import Sample
 
 class Tokenizer:
     def __init__(self):
-        # self.core = BertTokenizer.from_pretrained('wietsedv/bert-base-dutch-cased', use_fast=True)
         self.core = RobertaTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
 
     def encode_sample(self, sample: Sample) -> list[int]:
