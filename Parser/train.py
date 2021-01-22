@@ -12,7 +12,7 @@ from .neural.utils import *
 
 decoder_epochs = 40
 tag_epochs = 80
-parse_epochs = 80
+parse_epochs = 100
 
 
 def logprint(x: str, ostreams: list[Any]) -> None:
@@ -25,7 +25,7 @@ def logprint(x: str, ostreams: list[Any]) -> None:
 def load_model(parser: Parser, load: str, **kwargs) -> tuple[int, Dict, int]:
     print('Loading model parameters...')
     temp = torch.load(load, **kwargs)
-    parser.load_state_dict(temp['model_state_dict'])
+    parser.load_state_dict(temp['model_state_dict'], strict=False)
     step_num = temp['step']
     opt_state_dict = temp['opt_state_dict']
     epoch = temp['epoch']
@@ -88,7 +88,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
     _opt = torch.optim.AdamW(parser.parameters(), lr=1e10, betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-02)
     dec_schedule = make_cosine_schedule(max_lr=5e-04, warmup_steps=1000, decay_over=decoder_epochs * nbatches)
     tag_schedule = make_cosine_schedule(max_lr=1e-04, warmup_steps=5000, decay_over=tag_epochs * nbatches)
-    parse_schedule = make_cosine_schedule(max_lr=5e-05, warmup_steps=1000, decay_over=parse_epochs * nbatches)
+    parse_schedule = make_cosine_schedule(max_lr=1e-04, warmup_steps=1000, decay_over=parse_epochs * nbatches)
 
     fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='batchmean'), len(parser.atom_tokenizer), 0.1,
                            ignore_index=[parser.atom_tokenizer.pad_token_id, parser.atom_tokenizer.sos_token_id])
@@ -112,7 +112,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
     for e in range(init_epoch, decoder_epochs + tag_epochs + parse_epochs):
         validate = e % 5 == 0
         save = e % 10 == 0
-        linking_weight = 0.1 if e >= decoder_epochs + tag_epochs else 0.
+        linking_weight = 0.5 if e >= decoder_epochs + tag_epochs else 0.
 
         if save and e != init_epoch:
             print('\tSaving')
