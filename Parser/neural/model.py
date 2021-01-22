@@ -1,6 +1,6 @@
 from typing import NoReturn
 
-from torch.nn import functional, LayerNorm, Dropout, Linear, Sequential, GELU
+from torch.nn import functional, Dropout, Sequential, LayerNorm
 from torch.optim.optimizer import Optimizer
 from torch.utils.data.dataloader import DataLoader
 
@@ -8,7 +8,7 @@ from ..neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
 from ..neural.utils import *
 from ..neural.embedding import ComplexEmbedding
 from ..parsing.postprocessing import TypeParser, Analysis
-from ..neural.transformer import make_decoder
+from ..neural.transformer import make_decoder, FFN
 
 from transformers import RobertaModel
 
@@ -23,7 +23,7 @@ class Parser(Module):
         self.num_embeddings = len(atokenizer)
         self.device = device
         self.atom_tokenizer = atokenizer
-        self.type_parser = TypeParser(atokenizer)
+        self.type_parser = TypeParser()
         self.tokenizer = tokenizer
         self.dropout = Dropout(0.1)
         self.enc_heads = 8
@@ -31,7 +31,6 @@ class Parser(Module):
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
         self.word_encoder = RobertaModel.from_pretrained("pdelobelle/robbert-v2-dutch-base").to(device)
-        # self.word_encoder = BertModel.from_pretrained('wietsedv/bert-base-dutch-cased').to(device)
         self.supertagger = make_decoder(num_layers=6, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
@@ -43,8 +42,12 @@ class Parser(Module):
                                    d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,
                                    d_v_enc=self.enc_dim//self.enc_heads, d_v_dec=self.dec_dim//self.dec_heads,
                                    d_interm=self.dec_dim * 2, dropout_rate=0.1).to(device)
-        self.pos_transformation = LayerNorm(self.dec_dim).to(device)
-        self.neg_transformation = LayerNorm(self.dec_dim).to(device)
+        self.pos_transformation = Sequential(
+            FFN(self.dec_dim, self.dec_dim, 0.1, self.dec_dim//2), LayerNorm(self.dec_dim, eps=1e-12)
+        ).to(device)
+        self.neg_transformation = Sequential(
+            FFN(self.dec_dim, self.dec_dim, 0.1, self.dec_dim // 2), LayerNorm(self.dec_dim, eps=1e-12)
+        ).to(device)
 
     def forward(self, *args) -> NoReturn:
         raise NotImplementedError('Forward not implemented.')
@@ -102,19 +105,18 @@ class Parser(Module):
         out = self.word_encoder(lexical_token_ids.to(self.device), attention_mask=encoder_mask.to(self.device))
         return self.dropout(out['last_hidden_state'])
 
-    def encode_atoms(self, atom_reprs: Tensor, atom_mask: Tensor, word_reprs: Tensor, word_mask: Tensor) \
+    def encode_atoms(self, atom_reprs: Tensor, atom_mask: Tensor) \
             -> Tensor:
         s_out = atom_reprs.shape[1]
         if s_out == 0:
             return atom_reprs
-        return self.linker((word_reprs, word_mask, atom_reprs, atom_mask))[2]
+        return self.linker((atom_reprs, atom_mask))[0]
 
-    def link(self, atom_reprs: Tensor, atom_mask: Tensor, word_reprs: Tensor, word_mask: Tensor,
-             pos_idxes: list[list[Tensor]], neg_idxes: list[list[Tensor]], exclude_singular: bool = True,
-             sinkhorn_iters: int = 3) \
+    def link(self, atom_reprs: Tensor, atom_mask: Tensor, pos_idxes: list[list[Tensor]], neg_idxes: list[list[Tensor]],
+             exclude_singular: bool = True, sinkhorn_iters: int = 5, add_noise: bool = False) \
             -> list[Tensor]:
 
-        atom_reprs = self.encode_atoms(atom_reprs, atom_mask, word_reprs, word_mask)
+        atom_reprs = self.encode_atoms(atom_reprs, atom_mask)
 
         _positives: list[list[Tensor]] = make_sinkhorn_inputs(atom_reprs, pos_idxes, self.device)
         _negatives: list[list[Tensor]] = make_sinkhorn_inputs(atom_reprs, neg_idxes, self.device)
@@ -130,31 +132,33 @@ class Parser(Module):
         matches: list[Tensor] = []
 
         all_shape_positives: list[Tensor] \
-            = [self.dropout(torch.stack([tensor for tensor in positives if tensor.size()[0] == shape]))
+            = [self.pos_transformation(self.dropout(torch.stack([tensor for tensor in positives
+                                                                 if tensor.size()[0] == shape])))
                for shape in distinct_shapes]
         all_shape_negatives: list[Tensor] \
-            = [self.dropout(torch.stack([tensor for tensor in negatives if tensor.size()[0] == shape]))
+            = [self.neg_transformation(self.dropout(torch.stack([tensor for tensor in negatives
+                                                                 if tensor.size()[0] == shape])))
                for shape in distinct_shapes]
 
         for this_shape_positives, this_shape_negatives in zip(all_shape_positives, all_shape_negatives):
-            this_shape_positives = self.pos_transformation(this_shape_positives)
-            this_shape_negatives = self.neg_transformation(this_shape_negatives)
             weights = torch.bmm(this_shape_positives,
                                 this_shape_negatives.transpose(2, 1))
+            if add_noise:
+                weights = weights + self.gumbel.sample(weights.shape).to(self.device)
             matches.append(self.sinkhorn(weights, iters=sinkhorn_iters))
         return matches
 
     def link_train(self, *args, **kwargs) -> list[Tensor]:
-        return self.link(*args, **kwargs, sinkhorn_iters=5)
+        return self.link(*args, **kwargs, sinkhorn_iters=5, add_noise=False)
 
     def link_eval(self, *args, **kwargs) -> list[Tensor]:
-        return self.link(*args, **kwargs, sinkhorn_iters=5)
+        return self.link(*args, **kwargs, sinkhorn_iters=5, add_noise=False)
 
-    def link_slow(self, atom_reprs: Tensor, atom_mask: Tensor, word_reprs: Tensor, word_mask: Tensor,
-                  pos_idxes: list[list[Tensor]], neg_idxes: list[list[Tensor]], sinkhorn_iters: int = 10)\
+    def link_slow(self, atom_reprs: Tensor, atom_mask: Tensor, pos_idxes: list[list[Tensor]],
+                  neg_idxes: list[list[Tensor]], sinkhorn_iters: int = 10) \
             -> tuple[list[list[Tensor]], list[list[Tensor]]]:
 
-        atom_reprs = self.encode_atoms(atom_reprs, atom_mask, word_reprs, word_mask)
+        atom_reprs = self.encode_atoms(atom_reprs, atom_mask)
 
         _positives: list[list[Tensor]] = make_sinkhorn_inputs(atom_reprs, pos_idxes, self.device)
         _negatives: list[list[Tensor]] = make_sinkhorn_inputs(atom_reprs, neg_idxes, self.device)
@@ -166,9 +170,8 @@ class Parser(Module):
             local_ws = []
             local_rs = []
             for pos, neg in sent:
-                pos = self.dropout(self.pos_transformation(pos))
-                neg = self.dropout(self.pos_transformation(neg))
-                weights = pos @ neg.transpose(-1, -2)
+                weights = self.pos_transformation(self.dropout(pos)) @ \
+                          self.neg_transformation(self.dropout(neg.transpose(-1, -2)))
                 local_ws.append(weights)
                 local_rs.append(self.sinkhorn(weights.unsqueeze(0), iters=sinkhorn_iters))
             ws.append(local_ws)
@@ -356,13 +359,13 @@ class Parser(Module):
             link_loss = 0
         else:
             # axiom linking
-            link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
+            link_weights = self.link_train(output_reprs, atom_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in grouped_permutors]
             link_loss = sum((
                 functional.nll_loss(link.flatten(0, 1), perm.flatten(), reduction='mean')
                 for link, perm in zip(link_weights, grouped_permutors)
             ))
-            mutual_loss = link_loss * linking_weight + supertagging_loss
+            mutual_loss = link_loss * linking_weight + (1 - linking_weight) * supertagging_loss
             mutual_loss.backward()
 
         optimizer.step()
@@ -376,11 +379,10 @@ class Parser(Module):
 
         words, types, pos_idxes, neg_idxes, grouped_permutors = batch
         atom_mask = self.make_atom_mask(types)
-        true_embeddings = self.atom_embedder(types.to(self.device))
 
         max_length = types.shape[1]
         temp = self.decode_greedy(words, max_decode_length=max_length)
-        type_predictions, _, encoder_output, wmask, _ = temp
+        type_predictions, _, encoder_output, wmask, decoder_output = temp
         type_predictions = type_predictions[:, 1:-1]
 
         # supertagging
@@ -388,7 +390,7 @@ class Parser(Module):
 
         if link:
             # linking
-            links = self.link_eval(true_embeddings, atom_mask, encoder_output, wmask, pos_idxes, neg_idxes, False)
+            links = self.link_eval(decoder_output, atom_mask, pos_idxes, neg_idxes, False)
             permutors = [perm.to(self.device) for perm in grouped_permutors]
 
             return (measure_linking_accuracy(links, permutors),
@@ -451,14 +453,11 @@ class Parser(Module):
         lexical_token_ids = sents_to_batch(sents, self.tokenizer)
 
         if beam_size == 1:
-            temp = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
-            type_preds, atom_embeddings, encoder_output, wmask_, _ = temp
+            type_preds, _, _, _, decoder_out = self.decode_greedy(lexical_token_ids.to(self.device), **kwargs)
             type_preds = [[x] for x in type_preds.tolist()]
-            atom_embeddings = atom_embeddings.unsqueeze(1)
         else:
-            temp = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
-                                    stop_at=sent_lens, **kwargs)
-            type_preds, atom_embeddings, encoder_output, wmask_, _ = temp
+            type_preds, _, _, _, decoder_out = self.decode_beam(lexical_token_ids.to(self.device), beam_width=beam_size,
+                                                                stop_at=sent_lens, **kwargs)
             type_preds = type_preds.tolist()
 
         atom_seqs: list[list[Optional[list[list[str]]]]]
@@ -477,16 +476,12 @@ class Parser(Module):
         atom_mask = self.make_atom_mask_from_lens(atom_lens)
 
         atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
-        word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
-        wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
         for i, (s, b) in enumerate(ids):
-            atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
-            word_reprs[i] = encoder_output[s]
-            wmask[i] = wmask_[s]
+            atom_reprs[i] = decoder_out[s, b, :max(atom_lens)]
 
         positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
 
-        weights_, links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
+        weights_, links_ = self.link_slow(atom_reprs, atom_mask, positive_ids, negative_ids)
 
         weights = [[w.tolist()[0] for w in sent] for sent in weights_]
         links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
@@ -496,46 +491,42 @@ class Parser(Module):
 
         return analyses
 
-    @torch.no_grad()
-    def parse_with_oracle(self, samples: list[Sample]) -> list[list[Analysis]]:
-        self.eval()
-
-        sent_lens = list(map(lambda s: len(s.words) + 1, samples))
-        words, types, pos_ids, neg_ids = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
-
-        tmp = self.precode(words, types)
-        encoder_output, atom_embeddings, decoder_mask, wmask_ = tmp
-        type_preds = [[x] for x in types.tolist()]
-        atom_embeddings = atom_embeddings.unsqueeze(1)
-        atom_seqs: list[list[Optional[list[list[str]]]]]
-        # filter decoded atoms that count at least as many types as words
-        atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
-
-        analyses = self.type_parser.parse_beam_batch([' '.join(s.words) for s in samples], atom_seqs)
-        valid_for_linking = [((s, b), len(analyses[s][b].polish), analyses[s][b])
-                             for s in range(len(analyses))
-                             for b in range(len(analyses[s]))
-                             if analyses[s][b].valid()]
-        if not valid_for_linking:
-            return analyses
-
-        ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
-        atom_mask = self.make_atom_mask_from_lens(atom_lens)
-
-        atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
-        word_reprs = torch.zeros(len(ids), encoder_output.shape[1], self.enc_dim, device=self.device)
-        wmask = torch.zeros(len(ids), wmask_.shape[1], wmask_.shape[2], device=self.device, dtype=torch.long)
-        for i, (s, b) in enumerate(ids):
-            atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
-            word_reprs[i] = encoder_output[s]
-            wmask[i] = wmask_[s]
-
-        positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
-        weights_, links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
-
-        weights = [[w.tolist()[0] for w in sent] for sent in weights_]
-        links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
-        for va, weight, link in zip(valid_analyses, weights, links):
-            va.link_weights = weight
-            va.fill_matches(link)
-        return analyses
+    # @torch.no_grad()
+    # def parse_with_oracle(self, samples: list[Sample]) -> list[list[Analysis]]:
+    #     self.eval()
+    #
+    #     sent_lens = list(map(lambda s: len(s.words) + 1, samples))
+    #     words, types, pos_ids, neg_ids = self.atom_tokenizer.samples_to_batch(samples, self.tokenizer)
+    #
+    #     tmp = self.precode(words, types)
+    #     encoder_output, atom_embeddings, decoder_mask, wmask_ = tmp
+    #     type_preds = [[x] for x in types.tolist()]
+    #     atom_embeddings = atom_embeddings.unsqueeze(1)
+    #     atom_seqs: list[list[Optional[list[list[str]]]]]
+    #     # filter decoded atoms that count at least as many types as words
+    #     atom_seqs = self.atom_tokenizer.convert_beam_ids_to_polish(type_preds, sent_lens)
+    #
+    #     analyses = self.type_parser.parse_beam_batch([' '.join(s.words) for s in samples], atom_seqs)
+    #     valid_for_linking = [((s, b), len(analyses[s][b].polish), analyses[s][b])
+    #                          for s in range(len(analyses))
+    #                          for b in range(len(analyses[s]))
+    #                          if analyses[s][b].valid()]
+    #     if not valid_for_linking:
+    #         return analyses
+    #
+    #     ids, atom_lens, valid_analyses = list(zip(*valid_for_linking))
+    #     atom_mask = self.make_atom_mask_from_lens(atom_lens)
+    #
+    #     atom_reprs = torch.zeros(len(ids), max(atom_lens), self.dec_dim, device=self.device)
+    #     for i, (s, b) in enumerate(ids):
+    #         atom_reprs[i] = atom_embeddings[s, b, :max(atom_lens)]
+    #
+    #     positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
+    #     weights_, links_ = self.link_slow(atom_reprs, atom_mask, word_reprs, wmask, positive_ids, negative_ids)
+    #
+    #     weights = [[w.tolist()[0] for w in sent] for sent in weights_]
+    #     links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
+    #     for va, weight, link in zip(valid_analyses, weights, links):
+    #         va.link_weights = weight
+    #         va.fill_matches(link)
+    #     return analyses
