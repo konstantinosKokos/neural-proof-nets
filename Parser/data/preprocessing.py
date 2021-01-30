@@ -10,13 +10,13 @@ from operator import add
 
 from LassyExtraction.aethel import ProofNet, AxiomLinks
 from LassyExtraction.milltypes import (WordType, AtomicType, binarize_polish, FunctorType, get_polarities_and_indices,
-                                       ModalType, smallcaps)
+                                       ModalType)
 from LassyExtraction.extraction import CatDict, PtDict
 from typing import Optional
 
 MWU = AtomicType('_MWU')
 
-_atom_collations = {smallcaps('SPEC'): smallcaps('NP')}
+_atom_collations = {'SPEC': 'NP'}
 
 
 def make_atom_set() -> list[AtomicType]:
@@ -112,7 +112,7 @@ class Sample:
         atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types)))))
         negative, positive = list(map(lambda x: reduce(add, x), atoms))
         conclusion = pn.proof_frame.conclusion
-        negative += [(conclusion, pn.proof_frame.conclusion.index)]
+        negative += [(collate_type(conclusion), conclusion.index)]
 
         p_sep = separate(positive, _atom_set)
         n_sep = separate(negative, _atom_set)

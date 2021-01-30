@@ -9,6 +9,22 @@ from ..data.preprocessing import Sample
 from ..neural.utils import batchify_vectorized_samples, Item
 
 
+def make_cyclic_triangular_schedule(max_lr: float, warmup_steps: int, triangle_decay: int, decay_over: int) \
+        -> Callable[[int], float]:
+    linear_factor = max_lr / warmup_steps
+    cos_window = make_cosine_window(max_lr, warmup_steps, decay_over - warmup_steps)
+
+    def schedule(step: int):
+        if step < warmup_steps:
+            return linear_factor * step
+        num_triangles = (step - warmup_steps) // triangle_decay
+        init_step = num_triangles * triangle_decay
+        init_lr = cos_window(init_step + warmup_steps)
+        down_factor = init_lr / triangle_decay
+        return init_lr - down_factor * ((step - warmup_steps) % triangle_decay)
+    return schedule
+
+
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:
     """
         Makes a schedule that increases the lr from 0 to max_lr over warmup_steps,
@@ -20,8 +36,7 @@ def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> C
     def cosine_schedule(step: int) -> float:
         if step < warmup_steps:
             return linear_factor * step
-        else:
-            return cos_window(step)
+        return cos_window(step)
 
     return cosine_schedule
 
@@ -38,18 +53,20 @@ def make_cosine_window(max_lr: float, offset: int, decay_over: int) -> Callable[
 
 
 class Scheduler:
-    def __init__(self, opt: Optimizer, schedule: Callable[[int], float], param_group_scales: Sequence[float] = (1,)):
+    def __init__(self, opt: Optimizer, schedule: Callable[[int], float], lr_scales: Optional[list[float]] = None):
         self.opt = opt
         self.schedule = schedule
         self.step_num = 0
-        self.lr = 0
-        self.param_group_scales = param_group_scales
+        self.lr = 0.
+        if lr_scales is None:
+            lr_scales = (1,) * len(self.opt.param_groups)
+        self.lr_scales = lr_scales
 
     def step(self) -> None:
         self.step_num += 1
         self.lr = self.schedule(self.step_num)
         for i, p in enumerate(self.opt.param_groups):
-            p['lr'] = self.lr * self.param_group_scales[i]
+            p['lr'] = self.lr * self.lr_scales[i]
         self.opt.step()
 
     def zero_grad(self) -> None:

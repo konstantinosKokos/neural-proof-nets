@@ -18,8 +18,8 @@ def mh_scaled_dot_product(queries: Tensor, keys: Tensor, values: Tensor,
 
     weights = contract('bidh,bodh->bioh', queries, keys) / dividend
     if mask is not None:
-        mask = mask.unsqueeze(-1).repeat(1, 1, 1, num_heads)
-        weights = weights.masked_fill_(mask == 0, value=-1e10)
+        # mask = mask.unsqueeze(-1).repeat(1, 1, 1, num_heads)
+        weights = weights.masked_fill_(mask.eq(0).unsqueeze(-1), value=-1e10)
     weights = weights.softmax(dim=-2)
     return torch.einsum('bioh,bodh->bidh', weights, values).flatten(-2)
 

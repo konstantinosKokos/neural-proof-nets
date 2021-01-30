@@ -62,8 +62,8 @@ def sents_to_batch(sents: list[str], tokenizer: Tokenizer) -> Tensor:
 
 
 class AtomTokenizer(object):
-    def __init__(self, atom_map: Mapping[str, int]):
-        self.atom_map = atom_map
+    def __init__(self, atom_map: Optional[Mapping[str, int]] = None):
+        self.atom_map = read_atom_mapping() if atom_map is None else atom_map
         self.inverse_atom_map = {v: k for k, v in self.atom_map.items()}
         self.sep_token = '[SEP]'
         self.sos_token = '[SOS]'
@@ -163,6 +163,15 @@ def samples_to_batch(samples: list[Sample], atokenizer: 'AtomTokenizer', tokeniz
 def make_atom_mapping(samples: list[Sample]) -> Mapping[str, int]:
     polishes: list[str] = list(chain.from_iterable(map(lambda sample: sample.polish, samples)))
     return {**{'[PAD]': 0}, **{p: i + 1 for i, p in enumerate(sorted(set(polishes)))}}
+
+
+def read_atom_mapping(path: str = './Parser/data/atom_map.txt'):
+    atom_map = dict()
+    with open(path, 'r') as f:
+        for i, line in enumerate(f):
+            atom, idx = line.split(':')
+            atom_map[atom] = int(idx)
+    return atom_map
 
 
 def measure_linking_accuracy(pred: list[Tensor], truth: list[Tensor]) -> tuple[int, int]:
