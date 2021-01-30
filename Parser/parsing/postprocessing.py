@@ -5,7 +5,7 @@ from LassyExtraction.milltypes import (polish_to_type, WordType, polarize_and_in
 from LassyExtraction.aethel import ProofNet, ProofFrame, Premise
 
 from ..neural.utils import tensorize_batch_indexers
-from ..data.preprocessing import MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus
+from ..data.preprocessing import MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus, Sample
 
 from typing import Dict, Optional
 
@@ -19,7 +19,7 @@ class ParseError(Exception):
 
 class TypeParser:
     @staticmethod
-    def polish_to_type(self, symbols: list[str]) -> WordType:
+    def polish_to_type(symbols: list[str]) -> WordType:
         try:
             return polish_to_type(unarize_polish(symbols))
         except (AssertionError, IndexError):
@@ -43,7 +43,7 @@ class TypeParser:
     def get_atomset_and_indices(types: list[WordType]) \
             -> tuple[list[str], list[AtomicType], list[list[int]], list[list[int]], Dict[int, int]]:
 
-        if not invariance_check(types[1:], types[0]):
+        if not invariance_check([t for t in types[1:] if t != MWU], types[0]):
             raise ParseError(f'Failing to satisfy invariance for judgement {types[1:]} ˫ {types[0]}')
 
         atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types[1:])))))
@@ -121,3 +121,4 @@ class Analysis:
         words, types = pad_mwus(self.words, self.types[1:])
         pframe = ProofFrame(premises=[Premise(word, wt) for word, wt in zip(words, types)], conclusion=self.types[0])
         return ProofNet(proof_frame=pframe, axiom_links={(k, v) for k, v in self.axiom_links.items()}, name=name)
+
