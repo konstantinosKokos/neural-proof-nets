@@ -1,7 +1,7 @@
 from ..neural.model import Parser
 from ..data.preprocessing import Sample, load_stored
 from ..parsing.postprocessing import Analysis
-from ..neural.utils import make_atom_mapping, AtomTokenizer, Tokenizer
+from ..neural.utils import AtomTokenizer, Tokenizer
 
 import torch
 
@@ -12,11 +12,10 @@ from operator import eq, add
 
 def make_stuff() -> tuple[Parser, list[Sample]]:
     train, dev, test = load_stored('./processed.p')
-    atom_map = make_atom_mapping(train+dev+test)
-    parser = Parser(AtomTokenizer(atom_map), Tokenizer(), device='cuda')
-    parser.load_state_dict(torch.load('./stored_models/model_weights.p',
+    parser = Parser(AtomTokenizer(), Tokenizer(), device='cuda')
+    parser.load_state_dict(torch.load('./stored_models/triangular-cycles-cor/140.model',
                                       map_location='cuda')['model_state_dict'])
-    return parser, sorted(list(filter(lambda x: len(x.polish) < 140, test)), key=lambda x: len(x.polish))
+    return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
 
 
 def infer_dataset(model: Parser, data: list[Sample], beam_size: int, batch_size: int) -> list[list[Analysis]]:
@@ -55,11 +54,13 @@ def types_correct(x: Analysis, y: Analysis) -> bool:
 
 def term_correct(x: Analysis, y: Analysis, check_decoration: bool) -> bool:
     y_term = y.to_proofnet().print_term(show_words=False, show_types=False, show_decorations=check_decoration)
+    if not x.valid() or x.traceback is not None:
+        return False
     try:
         x_term = x.to_proofnet().print_term(show_words=False, show_types=False, show_decorations=check_decoration)
-        return x_term == y_term
-    except TypeError:
+    except (AssertionError, AttributeError):
         return False
+    return x_term == y_term
 
 
 def passing(x: Analysis) -> bool:
@@ -81,11 +82,9 @@ def matches_in_beams(beams: list[list[Analysis]], corrects: list[Analysis],
 
 
 def measure_lambda_accuracy(beams: list[list[Analysis]], corrects: list[Analysis], check_decorations: bool) -> float:
-    if check_decorations:
-        comp = lambda x, y: term_correct(x, y, True)
-    else:
-        comp = lambda x, y: term_correct(x, y, False)
-    return matches_in_beams(beams, corrects, comp) / len(beams)
+    def check(x: Analysis, y: Analysis) -> bool:
+        return term_correct(x, y, check_decoration=check_decorations)
+    return matches_in_beams(beams, corrects, check) / len(beams)
 
 
 def measure_typing_accuracy(beams: list[list[Analysis]], corrects: list[Analysis]) -> float:
@@ -127,9 +126,9 @@ def fill_table(kappas: list[int]) -> None:
         print(f'{k=}')
         print('=' * 64)
         predictions = infer_dataset(parser, data, k, 256)
-        coverage = measure_coverage(predictions)/len(predictions)
+        coverage = measure_coverage(predictions)
         print(f'{coverage=}')
-        invc = measure_inv_correct(predictions)/len(predictions)
+        invc = measure_inv_correct(predictions)
         print(f'{invc=}')
         token_acc = measure_token_accuracy(predictions, truths)
         print(f'{token_acc=}')

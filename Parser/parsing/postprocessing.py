@@ -5,7 +5,8 @@ from LassyExtraction.milltypes import (polish_to_type, WordType, polarize_and_in
 from LassyExtraction.aethel import ProofNet, ProofFrame, Premise
 
 from ..neural.utils import tensorize_batch_indexers
-from ..data.preprocessing import MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus, Sample
+from ..data.preprocessing import (MWU, separate, idx_from_polish, reduce, add, polish_seq, pad_mwus, Sample,
+                                  remove_polarities)
 
 from typing import Dict, Optional
 
@@ -26,6 +27,8 @@ class TypeParser:
             raise ParseError(f'Could not parse sequence: {symbols}')
 
     def polishes_to_types(self, symbols: list[list[str]]) -> list[WordType]:
+        if not symbols:
+            raise ParseError(f'Non-iterable sequence: {symbols}')
         return [self.polish_to_type(s) for s in symbols]
 
     @staticmethod
@@ -43,7 +46,10 @@ class TypeParser:
     def get_atomset_and_indices(types: list[WordType]) \
             -> tuple[list[str], list[AtomicType], list[list[int]], list[list[int]], Dict[int, int]]:
 
-        if not invariance_check([t for t in types[1:] if t != MWU], types[0]):
+        try:
+            if not invariance_check([t for t in types[1:] if t != MWU], types[0]):
+                raise ParseError(f'Failing to satisfy invariance for judgement {types[1:]} ˫ {types[0]}')
+        except ValueError:
             raise ParseError(f'Failing to satisfy invariance for judgement {types[1:]} ˫ {types[0]}')
 
         atoms = list(zip(*list(map(get_polarities_and_indices, filter(lambda wordtype: wordtype != MWU, types[1:])))))
@@ -65,7 +71,7 @@ class TypeParser:
         for p, n in zip(positive_ids, negative_ids):
             if len(p) != len(n):
                 raise ParseError(f'Uneven positives and negatives {p}, {n}')
-        return polished, local_atom_set, positive_ids, negative_ids, polish_from_index
+        return remove_polarities(polished), local_atom_set, positive_ids, negative_ids, polish_from_index
 
     def parse_beam_batch(self, sents: list[str], decoder_output: list[list[Optional[list[list[str]]]]]):
         ret: list[list[Analysis]] = []
@@ -90,7 +96,7 @@ class TypeParser:
 class Analysis:
     words: list[str] = None
     types: list[WordType] = None
-    polish: list[list[str]] = None
+    polish: list[str] = None
     atom_set: list[AtomicType] = None
     pos_ids: list[list[int]] = None
     neg_ids: list[list[int]] = None
@@ -118,7 +124,35 @@ class Analysis:
                 self.traceback = ParseError('Disconnected graph.')
 
     def to_proofnet(self, name: Optional[str] = None) -> ProofNet:
-        words, types = pad_mwus(self.words, self.types[1:])
-        pframe = ProofFrame(premises=[Premise(word, wt) for word, wt in zip(words, types)], conclusion=self.types[0])
-        return ProofNet(proof_frame=pframe, axiom_links={(k, v) for k, v in self.axiom_links.items()}, name=name)
+        return ProofNet(self.to_proof_frame(), axiom_links={(k, v) for k, v in self.axiom_links.items()}, name=name)
 
+    def to_proof_frame(self) -> ProofFrame:
+        words, types = merge_mwus(self.words, self.types[1:])
+        return ProofFrame(premises=[Premise(word, wt) for word, wt in zip(words, types)], conclusion=self.types[0])
+
+    @staticmethod
+    def from_sample(sample: Sample) -> 'Analysis':
+        words = sample.words
+        types = sample.types
+        polish = sample.polish
+        axiom_links = {k: v for k, v in sample.proof}
+        pos_ids = [pid for pid in sample.pos_ids if pid]
+        neg_ids = [nid for nid in sample.neg_ids if nid]
+        return Analysis(words=words, types=types, polish=polish, axiom_links=axiom_links,
+                        pos_ids=pos_ids, neg_ids=neg_ids)
+
+
+def merge_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list[WordType]]:
+    def get_word(i: int) -> str:
+        ret = words[i]
+        for j in range(i+1, len(types)):
+            if types[j] == MWU:
+                ret += f'_{words[j]}'
+            else:
+                break
+        return ret
+
+    owords = [get_word(i) if types[i] != MWU else None for i in range(len(types))]
+    words = [w for w in owords if w is not None]
+    types = [t for t in types if t != MWU]
+    return words, types

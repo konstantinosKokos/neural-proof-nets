@@ -1,6 +1,6 @@
 from Parser.train import init_without_datasets, load_model, Parser
 # _weights_path = './stored_models/model_weights.p'
-_weights_path = './stored_models/try/90.model'
+_weights_path = './stored_models/triangular-cycles-cor/140.model'
 
 
 def get_model(device: str) -> Parser:

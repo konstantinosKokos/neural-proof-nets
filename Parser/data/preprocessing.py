@@ -121,8 +121,9 @@ class Sample:
                             list(zip(
                                 list(map(lambda _sep: [item[1] for item in _sep], p_sep)),
                                 list(map(lambda _sep: [item[1] for item in _sep], n_sep))))))
+        types = [conclusion] + types
 
-        polished = polish_seq([conclusion] + types)
+        polished = polish_seq(types)
         p_to_ids = idx_from_polish(polished, 0)
         pos_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), p_sep))
         neg_ids = list(map(lambda idxs: list(map(lambda atom: p_to_ids[atom[1]], idxs)), n_sep))
