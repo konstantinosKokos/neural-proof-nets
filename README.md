@@ -2,6 +2,20 @@
 ## About
 Code for the paper Neural Proof Nets ([2009.12702](https://arxiv.org/abs/2009.12702)).
 
+## Update 01/02/2021
+This branch contains an updated version of the original submission, with many major improvements
+on the output data structures, model architecture and training process.
+
+The new model's benchmarks and relative differences to the original are reported in the table below.
+
+| Metric (%)       | Greedy     | Beam (2)     |  Beam (3)       | Beam (5)     | 
+| :------------- | :----------: | -----------: | :------------- | :----------: | 
+|  Coverage | 87.4  (N/A)  | 92.2 (N/A)    | 92.9 (N/A) |  93.66 (N/A)|
+| Token Accuracy   | 88.5 (+3.0) | 93.4 (+2.0) | 93.7 (+1.3) | 94.0 (+0.8) |
+| Frame Accuracy   | 67.0 (+2.4) | 69.8 (+4.4)| 70.6 (+2.6) | 71.4 (1.8) |
+|  λ→ Accuracy  | 67.4 (+7.4) | 69.4 (+3.8) | 70.0 (+2.3) | 70.6 (+1.5) |
+|  λ→◇□ Accuracy | 64.3 (+7.4) | 66.6 (+2.9) | 67.3 (+1.4) | 67.9 (+0.8) |
+
 ## Usage
 
 ### Installation
@@ -11,7 +25,7 @@ Clone the project locally. In a clean python venv do `pip install -r requirement
 
 ### Inference
 To run the model in inference mode:
-1. Download pretrained weights from [here](https://surfdrive.surf.nl/files/index.php/s/Af9P4PsZ1qEv04N)
+1. Download pretrained weights from [here](https://surfdrive.surf.nl/files/index.php/s/qYnyHAk3fUjYI8q)
 2. Unzip the downloaded file, and place its contents in a directory `stored_models`, alongside `Parser`.
 Your resulting directory structure should look like:
 
@@ -23,7 +37,7 @@ Your resulting directory structure should look like:
        +--train.py
        +--__init__.py
     +--stored_models
-       +--model_weights.p
+       +--model_weights.model
     +--README.md
     +--requirements.txt
     ```
@@ -35,14 +49,14 @@ Your resulting directory structure should look like:
     ```
     where `device` is either `"cpu"` or `"cuda"`, `xs` a list of strings to parse and `n` the beam size.
     `analyses` will be a list (one item per input string) of lists (one item per beam) of 
-    [Analysis](https://github.com/konstantinosKokos/neural-proof-nets/blob/ed8c13372bb5039e762030fe6b01129976094a9b/Parser/parsing/utils.py#L21) objects.
-    The key property of interest is `lambda_term`, which contains the 
-    λ-term derived from the sentence, if parsing was error-free, as in the example below:
+    [Analysis](https://github.com/konstantinosKokos/neural-proof-nets/blob/539036f32373a3e28f7350fb0c5a6f44af7107fc/Parser/parsing/postprocessing.py#L96) objects.
+    A non-failing analysis can be converted into a λ-term, as in the example below:
     ```
     >>> sent = "Wat is de lambda-term van dit voorbeeld?"
-    >>> term = model.infer([sent], 1)[0][0].lambda_term 
-    >>> print(term)
-    (Wat::(ᴠɴᴡ → sᴠ1) → ᴡʜǫ λx₀.((is::ᴠɴᴡ → ɴᴘ → sᴠ1 x₀ᵖʳᵉᵈᶜ) ((van::ɴᴘ → ɴᴘ → ɴᴘ (dit::ɴ → ɴᴘᵈᵉᵗ  voorbeeld?::ɴ)ᵒᵇʲ¹)ᵐᵒᵈ (de::ɴ → ɴᴘᵈᵉᵗ  lambda-term::ɴ))ˢᵘ)ʷʰᵈ_ᵇᵒᵈʸ)
+    >>> analysis = model.infer([sent], 1)[0][0]
+    >>> proofnet = analysis.to_proofnet()
+    >>> proofnet.print_term(show_words=True, show_types=False, show_decorations=True)
+    'Wat ▵ʷʰᵇᵒᵈʸ(λx₀.is ▵ᵖʳᵉᵈᶜ(▿ᵖʳᵉᵈᶜ(x₀)) ▵ˢᵘ(▾ᵐᵒᵈ(van ▵ᵒᵇʲ¹(▾ᵈᵉᵗ(dit) voorbeeld?)) ▾ᵈᵉᵗ(de) lambda-term))'
     ```
 
 #### Evaluation
