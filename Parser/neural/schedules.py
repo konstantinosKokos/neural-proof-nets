@@ -21,8 +21,9 @@ def make_cyclic_triangular_schedule(max_lr: float, warmup_steps: int, triangle_d
         init_step = num_triangles * triangle_decay
         init_lr = cos_window(init_step + warmup_steps)
         down_factor = init_lr / triangle_decay
-        return init_lr - down_factor * ((step - warmup_steps) % triangle_decay)
+        return init_lr - down_factor * (step - init_step - warmup_steps)
     return schedule
+
 
 
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:
