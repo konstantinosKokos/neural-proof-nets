@@ -147,7 +147,7 @@ def merge_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list
         ret = words[i]
         for j in range(i+1, len(types)):
             if types[j] == MWU:
-                ret += f'_{words[j]}'
+                ret += f' {words[j]}'
             else:
                 break
         return ret
