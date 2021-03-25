@@ -25,7 +25,6 @@ def make_cyclic_triangular_schedule(max_lr: float, warmup_steps: int, triangle_d
     return schedule
 
 
-
 def make_cosine_schedule(max_lr: float, warmup_steps: int, decay_over: int) -> Callable[[int], float]:
     """
         Makes a schedule that increases the lr from 0 to max_lr over warmup_steps,

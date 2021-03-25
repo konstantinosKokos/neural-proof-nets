@@ -5,14 +5,15 @@ import torch
 from torch import Tensor, LongTensor
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence as _pad_sequence
-from transformers import RobertaTokenizer
+from torch.nn.functional import nll_loss
+from transformers import BertTokenizer
 
 from ..data.preprocessing import Sample
 
 
 class Tokenizer:
     def __init__(self):
-        self.core = RobertaTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
+        self.core = BertTokenizer.from_pretrained('GroNLP/bert-base-dutch-cased')
 
     def encode_sample(self, sample: Sample) -> list[int]:
         return self.core.encode(' '.join(sample.words))
@@ -241,6 +242,15 @@ class FuzzyLoss(Module):
             mask = torch.bitwise_or(mask, y == idx)
         y_float[mask.unsqueeze(1).repeat(1, self.nc)] = 0
         return self.loss_fn(torch.log_softmax(x.view(-1, self.nc), dim=-1), y_float)
+
+
+class SinkhornLoss(Module):
+    def __init__(self):
+        super(SinkhornLoss, self).__init__()
+
+    def forward(self, predictions: list[Tensor], truths: list[Tensor]):
+        return sum(nll_loss(link.flatten(0, 1), perm.flatten(), reduction='sum')
+                   for link, perm in zip(predictions, truths))
 
 
 def count_parameters(model: Module) -> int:

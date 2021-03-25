@@ -1,11 +1,11 @@
 from typing import NoReturn
 
-from torch.nn import functional, Dropout, Sequential, LayerNorm
-from torch.optim.optimizer import Optimizer
+from torch.nn import Dropout, Sequential, LayerNorm
 from torch.utils.data.dataloader import DataLoader
 
 from ..neural.sinkhorn import sinkhorn_fn_no_exp as sinkhorn
 from ..neural.utils import *
+from ..neural.schedules import Scheduler
 from ..neural.embedding import ComplexEmbedding
 from ..parsing.postprocessing import TypeParser, Analysis
 from ..neural.transformer import make_decoder, FFN
@@ -233,110 +233,114 @@ class Parser(Module):
 
     @torch.no_grad()
     def decode_beam(self, lexical_token_ids: Tensor, beam_width: int, stop_at: list[int],
-                    max_decode_length: Optional[int] = None, length_factor: int = 5) \
-            -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-
-        def count_sep(x: Tensor, dim: int) -> Tensor:
-            sep = self.atom_tokenizer.sep_token_id
-            y = x.eq(sep)
-            return y.sum(dim)
+                    max_decode_length: Optional[int] = None, length_factor: int = 5, alpha: float = 0.) \
+            -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
 
         def backward_index(idx: int) -> tuple[int, int]:
             return idx // beam_width, idx - (idx // beam_width) * beam_width
 
-        b, s_in = lexical_token_ids.shape
+        def lp(beam_len: int) -> float:
+            return (beam_len + 5)**alpha/6**alpha
 
-        stop_at = torch.tensor(stop_at, dtype=torch.long, device=self.device)
+        def count_sep(xs: Tensor) -> Tensor:
+            return xs.eq(self.atom_tokenizer.sep_token_id).sum(dim=-1)
 
-        if max_decode_length is None:
-            s_out = length_factor * s_in
-        else:
-            s_out = max_decode_length
+        def invariance_check(xs: Tensor) -> bool:
+            return (xs.bincount()[5:36] % 2).bool().logical_not().all()
 
+        def get_last_span(xs: Tensor) -> list[str]:
+            xs = xs.tolist()
+            try:
+                start = len(xs) - 1 - xs[::-1].index(self.atom_tokenizer.sep_token_id)
+            except ValueError:
+                start = 0
+            return [self.atom_tokenizer.inverse_atom_map[x] for x in xs[start:]]
+
+        batch_size, s_in = lexical_token_ids.shape
+        stop_at = torch.tensor(stop_at, dtype=torch.long, device=self.device).unsqueeze(1)
+        s_out = length_factor * s_in if max_decode_length is None else max_decode_length
         encoder_mask = self.make_word_mask(lexical_token_ids)
         encoder_output = self.encode_words(lexical_token_ids, encoder_mask)
-
         extended_encoder_mask = encoder_mask.unsqueeze(1).repeat(1, s_out, 1).to(self.device)
-        decoder_mask = self.make_decoder_mask(b, s_out)
+        decoder_mask = self.make_decoder_mask(batch_size, s_out)
 
-        sos_tokens = (torch.ones(b) * self.atom_tokenizer.sos_token_id).long().to(self.device)
-        decoder_input = (self.atom_embedder(sos_tokens)).unsqueeze(1)
-        decoder_input = decoder_input.unsqueeze(1).repeat(1, beam_width, 1, 1)
+        sos_tokens = (torch.ones(batch_size, device=self.device) * self.atom_tokenizer.sos_token_id).long()
+        decoder_input = self.atom_embedder(sos_tokens).view(batch_size, 1, 1, self.dec_dim).repeat(1, beam_width, 1, 1)
         sos_tokens = sos_tokens.unsqueeze(1)
-        decoder_output = torch.zeros(b, beam_width, s_out, self.dec_dim).to(self.device)
-        output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long).to(self.device)
-        beam_scores = torch.zeros(b, beam_width, device=self.device)
+        decoder_output = torch.zeros(batch_size, beam_width, s_out, self.dec_dim, device=self.device)
+        output_symbols = torch.zeros(batch_size, beam_width, s_out, dtype=torch.long, device=self.device)
+        beam_scores = torch.zeros(batch_size, beam_width, device=self.device)
 
-        _masked_probs = torch.ones(1, 1, len(self.atom_tokenizer), device=self.device) * -1e03
-        _masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
+        masked_probs = torch.ones(1, 1, len(self.atom_tokenizer), device=self.device) * -1e10
+        masked_probs[:, :, self.atom_tokenizer.pad_token_id] = 0
 
         for t in range(s_out):
             # the next repr of each batch-beam combination
-            repr_t = torch.empty(b, beam_width, self.dec_dim, device=self.device)
+            repr_t = torch.empty(batch_size, beam_width, self.dec_dim, device=self.device)
             for beam in range(beam_width):
                 _decoder_tuple_input = (encoder_output, extended_encoder_mask,
                                         decoder_input[:, beam], decoder_mask[:, :t + 1, :t + 1])
                 repr_t[:, beam] = self.supertagger(_decoder_tuple_input)[2][:, -1]
+            logprobs_t = self.predict_atoms(repr_t, t+1).log_softmax(dim=-1)                        # B, K, S
 
-            logprobs_t = self.predict_atoms(repr_t, t+1).log_softmax(dim=-1)
-
-            sep_counts = count_sep(output_symbols, dim=-1)
-            valid_beams = sep_counts.lt(stop_at.unsqueeze(1))
-
-            if not valid_beams.flatten().any():
+            open_beams = count_sep(output_symbols).lt(stop_at).unsqueeze(-1)                        # B, K, (1)
+            if not open_beams.flatten().any():
                 break
 
+            # only trust first beam at t0
             if t == 0:
-                logprobs_t[:, 1:] = -1e3  # hack first decoder step
+                logprobs_t[:, 1:] = -1e10
 
-            logprobs_t = torch.where(valid_beams.unsqueeze(-1), logprobs_t, _masked_probs)
+            logprobs_t = torch.where(open_beams, logprobs_t, masked_probs)
 
-            # lists of K tensors of shape B, K
-            # local_scores[i] contains the K2 best branches originating from branch K1
+            # local_scores[k1] contains the k2 best branches originating from beam[k1]
             local_scores, local_steps = list(zip(*[logprobs_t[:, k].topk(k=beam_width, dim=-1)
                                                    for k in range(beam_width)]))
 
-            # local_scores[b, k1, k2]  contains the total score of branch k2 originating from branch k1 in sent b
-            local_scores = torch.stack(local_scores, dim=1) + beam_scores.unsqueeze(-1)
-            local_steps = torch.stack(local_steps, dim=1)  # B, K1, K2
-            best_scores, best_sources = local_scores.view(b, -1).topk(dim=-1, k=beam_width)  # B, K
+            local_scores = torch.stack(local_scores, dim=1) + beam_scores.unsqueeze(-1)                 # B, K1, K2
+            local_steps = torch.stack(local_steps, dim=1)                                               # B, K1, K2
 
-            best_source_idxes: list[list[tuple[int, int]]]  # B outer elements, K inner elements indexing (src, tgt)
+            best_scores, best_sources = local_scores.view(batch_size, -1).topk(dim=-1, k=beam_width)
             best_source_idxes = [[backward_index(idx) for idx in best_source] for best_source in best_sources.tolist()]
 
-            new_decoder_output = torch.zeros(b, beam_width, s_out, self.dec_dim, device=self.device)
-            new_decoder_input = torch.zeros(b, beam_width, t+1, self.dec_dim, device=self.device)
-            new_output_symbols = torch.zeros(b, beam_width, s_out, dtype=torch.long, device=self.device)
+            new_decoder_output = torch.zeros(batch_size, beam_width, s_out, self.dec_dim, device=self.device)
+            new_decoder_input = torch.zeros(batch_size, beam_width, t + 1, self.dec_dim, device=self.device)
+            new_output_symbols = torch.zeros(batch_size, beam_width, s_out, dtype=torch.long, device=self.device)
 
-            for sent in range(b):
+            for sent in range(batch_size):
                 for beam in range(beam_width):
                     origin, target = best_source_idxes[sent][beam]
-
                     new_decoder_output[sent, beam, :t] = decoder_output[sent, origin, :t]
                     new_decoder_output[sent, beam, t] = repr_t[sent, origin]
-                    new_decoder_input[sent, beam, :t+1] = decoder_input[sent, origin, :t+1]
+                    new_decoder_input[sent, beam, :t + 1] = decoder_input[sent, origin, :t + 1]
                     new_output_symbols[sent, beam, :t] = output_symbols[sent, origin, :t]
                     new_output_symbols[sent, beam, t] = local_steps[sent, origin, target]
                     beam_scores[sent, beam] = best_scores[sent, beam]
-
+                    if new_output_symbols[sent, beam, t] == self.atom_tokenizer.sep_token_id:
+                        if not TypeParser.polish_to_type(get_last_span(new_output_symbols[sent, beam])):
+                            beam_scores[sent, beam] = -1e10
+                        if count_sep(new_output_symbols[sent, beam, :t + 1]) == stop_at[sent]:
+                            if not invariance_check(new_output_symbols[sent, beam, :t+1]):
+                                beam_scores[sent, beam] = -1e10
+                            else:
+                                beam_scores[sent, beam] /= lp(t+1)
             decoder_output = new_decoder_output
             decoder_input = new_decoder_input
             output_symbols = new_output_symbols
 
-            class_t = output_symbols[:, :, t].view(b*beam_width)
+            class_t = output_symbols[:, :, t].view(batch_size * beam_width)
 
-            next_embedding = self.atom_embedder.embed(class_t, t+1).view(b, beam_width, self.dec_dim)
+            next_embedding = self.atom_embedder.embed(class_t, t + 1).view(batch_size, beam_width, self.dec_dim)
 
             if t != s_out - 1:
                 next_embedding = next_embedding.unsqueeze(2)
                 decoder_input = torch.cat([decoder_input, next_embedding], dim=2)
         output_symbols = torch.cat([sos_tokens.unsqueeze(1).repeat(1, beam_width, 1), output_symbols], dim=2)
-
         return (output_symbols, decoder_input, encoder_output, extended_encoder_mask,
-                decoder_output.view(b, beam_width, -1, self.dec_dim))
+                decoder_output.view(batch_size, beam_width, -1, self.dec_dim), beam_scores)
 
-    def pretrain_decoder_batch(self, batch: Batch, loss_fn: Module, optimizer: Optimizer, linking_weight: float) \
-            -> tuple[float, float]:
+    def pretrain_decoder_batch(self, batch: Batch, st_loss_fn: Module, l_loss_fn: Module,
+                               optimizer: Scheduler, linking_weight: float) -> tuple[float, float]:
         self.train()
         _, types, pos_idxes, neg_idxes, grouped_permutors = batch
         output_reprs, atom_embeddings, atom_mask = self.encode_with_decoder(types)
@@ -344,17 +348,14 @@ class Parser(Module):
         tagging_loss = loss_fn(type_predictions.contiguous(), types[:, 1:].contiguous().to(self.device))
         link_weights = self.link_train(atom_embeddings, atom_mask, None, None, pos_idxes, neg_idxes)
         grouped_permutors = [perm.to(self.device) for perm in grouped_permutors]
-        link_loss = sum((
-            functional.nll_loss(link.flatten(0, 1), perm.flatten(), reduction='mean')
-            for link, perm in zip(link_weights, grouped_permutors)
-        ))
+        link_loss = l_loss_fn(link_weights, grouped_permutors)
         mutual_loss = link_loss * linking_weight + (1 - linking_weight) * tagging_loss
         mutual_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
         return tagging_loss.item(), link_loss.item()
 
-    def train_batch(self, batch: Batch, loss_fn: Module, optimizer: Optimizer,
+    def train_batch(self, batch: Batch, st_loss_fn: Module, l_loss_fn: Module, optimizer: Scheduler,
                     linking_weight: float = 0.5) -> tuple[float, float]:
         self.train()
 
@@ -374,10 +375,7 @@ class Parser(Module):
             # axiom linking
             link_weights = self.link_train(atom_embeddings, atom_mask, encoder_output, word_mask, pos_idxes, neg_idxes)
             grouped_permutors = [perm.to(self.device) for perm in grouped_permutors]
-            link_loss = sum((
-                functional.nll_loss(link.flatten(0, 1), perm.flatten(), reduction='sum')
-                for link, perm in zip(link_weights, grouped_permutors)
-            ))
+            link_loss = l_loss_fn(link_weights, grouped_permutors)
             mutual_loss = link_loss * linking_weight + (1 - linking_weight) * supertagging_loss
             mutual_loss.backward()
 
@@ -423,21 +421,21 @@ class Parser(Module):
         types = types[:, 1:].to(self.device)
         return measure_linking_accuracy(links, permutors), measure_supertagging_accuracy(type_predictions, types)
 
-    def train_epoch(self, dataloader: DataLoader, loss_fn: Module, optimizer: Optimizer,
+    def train_epoch(self, dataloader: DataLoader, st_loss_fn: Module, l_loss_fn: Module, optimizer: Scheduler,
                     linking_weight: float = 0.5) -> tuple[float, float]:
 
         total_l1, total_l2 = 0, 0
         for batch in tqdm(dataloader):
-            l1, l2 = self.train_batch(batch, loss_fn, optimizer, linking_weight=linking_weight)
+            l1, l2 = self.train_batch(batch, st_loss_fn, l_loss_fn, optimizer, linking_weight=linking_weight)
             total_l1 += l1
             total_l2 += l2
         return total_l1 / len(dataloader), total_l2 / len(dataloader)
 
-    def pretrain_decoder_epoch(self, dataloader: DataLoader, loss_fn: Module, optimizer: Optimizer,
-                               linking_weight: float) -> tuple[float, float]:
+    def pretrain_decoder_epoch(self, dataloader: DataLoader, st_loss_fn: Module, l_loss_fn: Module,
+                               optimizer: Scheduler, linking_weight: float) -> tuple[float, float]:
         tag_loss, link_loss = 0., 0.
         for batch in tqdm(dataloader):
-            tl, ll = self.pretrain_decoder_batch(batch, loss_fn, optimizer, linking_weight)
+            tl, ll = self.pretrain_decoder_batch(batch, st_loss_fn, l_loss_fn, optimizer, linking_weight)
             tag_loss += tl
             link_loss += ll
         return tag_loss / len(dataloader), link_loss / len(dataloader)
@@ -482,7 +480,7 @@ class Parser(Module):
             type_preds = [[x] for x in type_preds.tolist()]
             atom_embeddings = atom_embeddings.unsqueeze(1)
         else:
-            type_preds, atom_embeddings, encoder_output, wmask_, _ = self.decode_beam(
+            type_preds, atom_embeddings, encoder_output, wmask_, _, _ = self.decode_beam(
                 lexical_token_ids.to(self.device), beam_width=beam_size, stop_at=sent_lens, **kwargs)
             type_preds = type_preds.tolist()
 

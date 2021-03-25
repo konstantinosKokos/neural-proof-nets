@@ -2,7 +2,8 @@ import os
 import subprocess
 import sys
 
-from torch.nn import KLDivLoss
+from torch.nn import KLDivLoss, CrossEntropyLoss
+from torch.optim import AdamW
 
 from .data.preprocessing import load_stored
 from .neural.model import *
@@ -10,9 +11,8 @@ from .neural.schedules import *
 from .neural.utils import *
 
 
-decoder_epochs = 60
-mutual_epochs = 241
-
+decoder_epochs = 0
+mutual_epochs = 90
 # torch.manual_seed(42)
 
 
@@ -82,15 +82,15 @@ def init_without_datasets(atom_map_path: str = './Parser/data/atom_map.txt', dev
 def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
           version: Optional[str] = None, save_to_dir: Optional[str] = None):
     def new_opt() -> torch.optim.Optimizer:
-        return torch.optim.AdamW(parser.parameters(), lr=0., betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-02)
+        return AdamW(parser.parameters(), lr=0., betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-02)
 
     train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
     dec_schedule = make_cosine_schedule(max_lr=5e-04, warmup_steps=nbatches//2, decay_over=decoder_epochs * nbatches)
-    mutual_schedule = make_cyclic_triangular_schedule(max_lr=1e-04, warmup_steps=nbatches,
+    mutual_schedule = make_cyclic_triangular_schedule(max_lr=5e-04, warmup_steps=250,
                                                       decay_over=mutual_epochs * nbatches,
-                                                      triangle_decay=5 * nbatches)
-    fuzzy_loss = FuzzyLoss(KLDivLoss(reduction='sum'), len(parser.atom_tokenizer), 0.1,
-                           ignore_index=[parser.atom_tokenizer.pad_token_id, parser.atom_tokenizer.sos_token_id])
+                                                      triangle_decay=30 * nbatches)
+    st_loss = CrossEntropyLoss(reduction='sum')
+    sh_loss = SinkhornLoss()
 
     if model_path is not None:
         print('Loading checkpoint...')
@@ -112,9 +112,9 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
         save_to_dir = './stored_models'
 
     for e in range(init_epoch, decoder_epochs + mutual_epochs):
-        validate = e % 5 == 0
+        validate = True
         save = e % 5 == 0 and e != init_epoch
-        linking_weight = 0.5
+        linking_weight = 0.33
 
         if save:
             print('\tSaving')
@@ -129,8 +129,8 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
                 logprint('=' * 64, [stream])
                 logprint(f'Pre-epoch {e}', [stream])
                 logprint(' ' * 50 + f'LR: {opt.lr}\t({opt.step_num})', [stream])
-                supertagging_loss, linking_loss = parser.pretrain_decoder_epoch(train_dl, fuzzy_loss, opt,
-                                                                                linking_weight)
+                supertagging_loss, linking_loss = parser.pretrain_decoder_epoch(train_dl, st_loss, sh_loss,
+                                                                                opt, linking_weight)
                 logprint(f' Supertagging Loss:\t\t{supertagging_loss:5.2f}', [stream])
                 logprint(f' Linking Loss:\t\t\t{linking_loss:5.2f}', [stream])
                 if validate:
@@ -150,7 +150,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
             logprint(' ' * 50 + f'LR: {opt.lr}\t({opt.step_num})', [stream])
             logprint(' ' * 50 + f'LW: {linking_weight}', [stream])
             logprint('-' * 64, [stream])
-            supertagging_loss, linking_loss = parser.train_epoch(train_dl, fuzzy_loss, opt, linking_weight)
+            supertagging_loss, linking_loss = parser.train_epoch(train_dl, st_loss, sh_loss, opt, linking_weight)
             logprint(f' Supertagging Loss:\t\t{supertagging_loss:5.2f}', [stream])
             logprint(f' Linking Loss:\t\t\t{linking_loss:5.2f}', [stream])
             if validate:
