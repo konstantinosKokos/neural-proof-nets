@@ -5,7 +5,7 @@ import torch
 from torch import Tensor, LongTensor
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence as _pad_sequence
-from torch.nn.functional import nll_loss
+from torch.nn.functional import nll_loss, cross_entropy
 from transformers import BertTokenizer
 
 from ..data.preprocessing import Sample
@@ -223,6 +223,10 @@ def make_permutors(matrices: list[list[list[list[bool]]]], max_difficulty: int, 
     return grouped_permutors
 
 
+def count_sep(xs: Tensor, sep_id: int, dim: int = -1) -> Tensor:
+    return xs.eq(sep_id).sum(dim=dim)
+
+
 class FuzzyLoss(Module):
     def __init__(self, loss_fn: Module, num_classes: int,
                  mass_redistribution: float, ignore_index: list[int]) -> None:
@@ -244,12 +248,23 @@ class FuzzyLoss(Module):
         return self.loss_fn(torch.log_softmax(x.view(-1, self.nc), dim=-1), y_float)
 
 
+class NormCrossEntropy(Module):
+    def __init__(self, ignore_index: int, sep_id: int):
+        super(NormCrossEntropy, self).__init__()
+        self.ignore_index = ignore_index
+        self.sep_id = sep_id
+
+    def forward(self, predictions: Tensor, truths: Tensor):
+        return cross_entropy(predictions.flatten(0, -2), truths.flatten(),
+                             reduction='sum', ignore_index=self.ignore_index) / count_sep(truths.flatten(), self.sep_id)
+
+
 class SinkhornLoss(Module):
     def __init__(self):
         super(SinkhornLoss, self).__init__()
 
     def forward(self, predictions: list[Tensor], truths: list[Tensor]):
-        return sum(nll_loss(link.flatten(0, 1), perm.flatten(), reduction='sum')
+        return sum(nll_loss(link.flatten(0, 1), perm.flatten(), reduction='mean')
                    for link, perm in zip(predictions, truths))
 
 
