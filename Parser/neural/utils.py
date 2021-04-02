@@ -1,4 +1,4 @@
-from itertools import chain
+from itertools import chain, groupby
 from typing import Mapping, Iterable, Optional
 
 import torch
@@ -205,22 +205,11 @@ def measure_supertagging_accuracy(pred: Tensor, truth: Tensor, ignore_idx: int =
 def make_permutors(matrices: list[list[list[list[bool]]]], max_difficulty: int, exclude_singular: bool = True) \
         -> list[Tensor]:
     def tensorize_matrix(matrix: list[list[bool]]) -> Tensor:
-        return LongTensor(matrix).argmax(dim=-1)
+        return LongTensor([row.index(True) for row in matrix])
 
-    permutors = [matrix for matrix in chain.from_iterable(matrices) if matrix]
-    distinct_shapes = {len(permutor) for permutor in permutors}
-    if exclude_singular:
-        distinct_shapes = distinct_shapes.difference({1})
-    distinct_shapes = sorted(distinct_shapes)
-
-    grouped_permutors = []
-    for shape in distinct_shapes:
-        if shape > max_difficulty:
-            break
-        this_shape_permutors = [permutor for permutor in permutors if len(permutor) == shape]
-        grouped_permutors.append(torch.stack([tensorize_matrix(matrix) for matrix in this_shape_permutors]))
-
-    return grouped_permutors
+    permutors = groupby(sorted(chain.from_iterable(matrices), key=len), key=len)
+    return [torch.stack([tensorize_matrix(m) for m in ms]) for s, ms in permutors
+            if int(exclude_singular) < s < max_difficulty]
 
 
 def count_sep(xs: Tensor, sep_id: int, dim: int = -1) -> Tensor:
