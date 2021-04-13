@@ -1,4 +1,4 @@
-from Parser.train import init_without_datasets, load_model, Parser
+from ..train import init_without_datasets, load_model, Parser
 _weights_path = './stored_models/model_weights.model'
 
 

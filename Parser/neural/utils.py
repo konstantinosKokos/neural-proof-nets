@@ -6,14 +6,14 @@ from torch import Tensor, LongTensor
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence as _pad_sequence
 from torch.nn.functional import nll_loss, cross_entropy
-from transformers import BertTokenizer
+from transformers import RobertaTokenizer
 
 from ..data.preprocessing import Sample
 
 
 class Tokenizer:
     def __init__(self):
-        self.core = BertTokenizer.from_pretrained('GroNLP/bert-base-dutch-cased')
+        self.core = RobertaTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
 
     def encode_sample(self, sample: Sample) -> list[int]:
         return self.core.encode(' '.join(sample.words))

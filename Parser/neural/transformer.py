@@ -3,7 +3,7 @@ from typing import *
 from torch import Tensor
 from torch.nn import Module, Sequential, Linear, LayerNorm, Dropout, GELU
 
-from Parser.neural.multi_head_atn import MultiHeadAttention
+from ..neural.multi_head_atn import MultiHeadAttention
 
 
 def FFN(d_model: int, d_ff: int, dropout_rate: float = 0.1, d_out: Optional[int] = None) -> Module:

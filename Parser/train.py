@@ -2,8 +2,7 @@ import os
 import subprocess
 import sys
 
-from torch.nn import KLDivLoss, CrossEntropyLoss
-from torch.optim import AdamW
+from torch.optim.adamw import AdamW
 
 from .data.preprocessing import load_stored
 from .neural.model import *
@@ -11,9 +10,8 @@ from .neural.schedules import *
 from .neural.utils import *
 
 
-decoder_epochs = 0
-mutual_epochs = 90
-# torch.manual_seed(42)
+decoder_epochs = 20
+mutual_epochs = 241
 
 
 def logprint(x: str, ostreams: list[Any]) -> None:
@@ -33,7 +31,7 @@ def load_model(parser: Parser, load: str, **kwargs) -> tuple[int, Dict, int]:
     return step_num, opt_state_dict, epoch
 
 
-def init(datapath: Optional[str] = None, max_len: int = 128, train_batch: int = 32,
+def init(datapath: Optional[str] = None, max_len: int = 140, train_batch: int = 32,
          val_batch: int = 128, device: str = 'cuda', version: Optional[str] = None,
          save_to_dir: Optional[str] = None) \
         -> tuple[DataLoader, DataLoader, DataLoader, int, Parser, str]:
@@ -81,15 +79,15 @@ def init_without_datasets(atom_map_path: str = './Parser/data/atom_map.txt', dev
 
 def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
           version: Optional[str] = None, save_to_dir: Optional[str] = None):
-    def new_opt() -> torch.optim.Optimizer:
-        return AdamW(parser.parameters(), lr=0., betas=(0.9, 0.98), eps=1e-09, weight_decay=1e-02)
 
     train_dl, val_dl, test_dl, nbatches, parser, version = init(data_path, version=version, save_to_dir=save_to_dir)
-    dec_schedule = make_cosine_schedule(max_lr=5e-04, warmup_steps=nbatches//2, decay_over=decoder_epochs * nbatches)
-    mutual_schedule = make_cyclic_triangular_schedule(max_lr=5e-04, warmup_steps=250,
-                                                      decay_over=mutual_epochs * nbatches,
-                                                      triangle_decay=30 * nbatches)
-    st_loss = CrossEntropyLoss(reduction='sum')
+    core_opt = AdamW(parser.parameters(), lr=0., betas=(0.9, 0.98), eps=1e-12, weight_decay=1e-02)
+    dec_schedule = make_cosine_schedule(max_lr=5e-04, warmup_steps=nbatches//4, decay_over=decoder_epochs * nbatches)
+    mutual_schedule = make_cosine_schedule_with_linear_restarts(max_lr=1e-04, warmup_steps=nbatches//4,
+                                                                decay_over=mutual_epochs * nbatches,
+                                                                triangle_decay=40 * nbatches)
+    st_loss = NormCrossEntropy(sep_id=parser.atom_tokenizer.sep_token_id,
+                               ignore_index=parser.atom_tokenizer.pad_token_id)
     sh_loss = SinkhornLoss()
 
     if model_path is not None:
@@ -100,19 +98,20 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
         else:
             schedule = mutual_schedule
 
-        opt = Scheduler(new_opt(), schedule)
+        opt = Scheduler(core_opt, schedule)
         opt.step_num = step_num
         opt.lr = opt.schedule(opt.step_num)
         opt.opt.load_state_dict(opt_dict)
+        del opt_dict
     else:
-        opt = Scheduler(new_opt(), dec_schedule)
+        opt = Scheduler(core_opt, dec_schedule)
         init_epoch = 0
 
     if save_to_dir is None:
         save_to_dir = './stored_models'
 
     for e in range(init_epoch, decoder_epochs + mutual_epochs):
-        validate = True
+        validate = e % 5 == 0 and e != init_epoch
         save = e % 5 == 0 and e != init_epoch
         linking_weight = 0.33
 
@@ -135,6 +134,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
                 logprint(f' Linking Loss:\t\t\t{linking_loss:5.2f}', [stream])
                 if validate:
                     with open(f'{save_to_dir}/{version}/val_log.txt', 'a') as valstream:
+                        logprint(f'Epoch {e}', [valstream])
                         logprint('-' * 64, [stream, valstream])
                         sentence_ac, atom_ac, link_ac = parser.preval_epoch(val_dl)
                         logprint(f' Sentence Accuracy:\t\t{(sentence_ac * 100):6.2f}', [stream, valstream])
@@ -142,7 +142,7 @@ def train(model_path: Optional[str] = None, data_path: Optional[str] = None,
                         logprint(f' Link Accuracy:\t\t{(link_ac * 100):6.2f}', [stream, valstream])
                 continue
         elif e == decoder_epochs:
-            opt = Scheduler(new_opt(), mutual_schedule)
+            opt = Scheduler(opt.opt, mutual_schedule)
 
         with open(f'{save_to_dir}/{version}/log.txt', 'a') as stream:
             logprint('=' * 64, [stream])
