@@ -4,7 +4,7 @@ click==7.1.2
 filelock==3.0.12
 idna==2.10
 joblib==1.0.1
-LassyExtraction==0.4.dev3
+-e git://github.com/konstantinosKokos/lassy-tlg-extraction@28af29e8190233e86f46bb4500465900e4887aba#egg=LassyExtraction
 numpy==1.20.2
 opt-einsum==3.3.0
 packaging==20.9
