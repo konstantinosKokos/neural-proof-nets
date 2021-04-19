@@ -13,7 +13,7 @@ from operator import eq, add
 def make_stuff() -> tuple[Parser, list[Sample]]:
     train, dev, test = load_stored('./processed.p')
     parser = Parser(AtomTokenizer(), Tokenizer(), device='cuda')
-    parser.load_state_dict(torch.load('./stored_models/triangular-cycles-cor/140.model',
+    parser.load_state_dict(torch.load('./stored_models/model_weights.model',
                                       map_location='cuda')['model_state_dict'])
     return parser, sorted(list(filter(lambda x: len(x.polish) < 100, test)), key=lambda x: len(x.polish))
 
@@ -117,7 +117,7 @@ def measure_token_accuracy(beams: list[list[Analysis]], corrects: list[Analysis]
     return reduce(add, best) / reduce(add, total)
 
 
-def fill_table(kappas: list[int]) -> None:
+def fill_table(kappas: list[int], batch_size: int = 256) -> None:
     parser, data = make_stuff()
 
     truths = data_to_analyses(data)
@@ -125,7 +125,7 @@ def fill_table(kappas: list[int]) -> None:
         print('=' * 64)
         print(f'{k=}')
         print('=' * 64)
-        predictions = infer_dataset(parser, data, k, 256)
+        predictions = infer_dataset(parser, data, k, batch_size=batch_size)
         coverage = measure_coverage(predictions)
         print(f'{coverage=}')
         invc = measure_inv_correct(predictions)
