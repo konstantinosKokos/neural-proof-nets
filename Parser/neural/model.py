@@ -547,9 +547,9 @@ class Parser(Module):
 
         positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
 
-        links_ = self.link_slow(atom_reprs, atom_mask, decoder_output, positive_ids, negative_ids)
+        weights_, links_ = self.link_slow(atom_reprs, atom_mask, decoder_output, positive_ids, negative_ids)
 
-        links = [[link_weights.argmax(dim=-1).tolist()[0] for _, link_weights in sent] for sent in links_]
+        links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
         for va, link in zip(valid_analyses, links):
             va.fill_matches(link)
         return analyses
