@@ -10,13 +10,16 @@ from ..neural.embedding import ComplexEmbedding
 from ..parsing.postprocessing import TypeParser, Analysis
 from ..neural.transformer import make_encoder, make_decoder, FFN
 
-from transformers import RobertaModel
+from transformers import RobertaModel, RobertaConfig
 
 from tqdm import tqdm
 
+from os import path
+
 
 class Parser(Module):
-    def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, dec_dim: int = 64, device: str = 'cpu'):
+    def __init__(self, atokenizer: AtomTokenizer, tokenizer: Tokenizer, dec_dim: int = 64, device: str = 'cpu',
+                 load_pretrained: bool = False):
         super(Parser, self).__init__()
         self.enc_dim = 768
         self.dec_dim = dec_dim
@@ -30,7 +33,11 @@ class Parser(Module):
         self.dec_heads = 8
         self.d_atn_dec = self.dec_dim//self.dec_heads
 
-        self.word_encoder = RobertaModel.from_pretrained("pdelobelle/robbert-v2-dutch-base").to(device)
+        if load_pretrained:
+            self.word_encoder = RobertaModel.from_pretrained("pdelobelle/robbert-v2-dutch-base").to(device)
+        else:
+            json_path = path.join(path.join(path.dirname(path.dirname(__file__)), 'data'), 'config.json')
+            self.word_encoder = RobertaModel(RobertaConfig.from_json_file(json_path)).to(device)
         self.supertagger = make_decoder(num_layers=6, num_heads_enc=self.enc_heads, num_heads_dec=self.dec_heads,
                                         d_encoder=self.enc_dim, d_decoder=self.dec_dim,
                                         d_atn_enc=self.enc_dim//self.enc_heads, d_atn_dec=self.d_atn_dec,

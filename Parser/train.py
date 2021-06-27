@@ -65,7 +65,7 @@ def init(datapath: Optional[str] = None, max_len: int = 140, train_batch: int = 
                               val_batch, False)
 
     print('Initializing model...')
-    parser = Parser(atokenizer, tokenizer, device=device)
+    parser = Parser(atokenizer, tokenizer, device=device, load_pretrained=True)
     return train_dl, dev_dl, test_dl, nbatches, parser, version
 
 
