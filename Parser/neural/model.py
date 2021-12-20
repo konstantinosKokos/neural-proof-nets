@@ -1,3 +1,4 @@
+import pdb
 from typing import NoReturn
 
 from torch.nn import Dropout, Sequential, LayerNorm
@@ -509,8 +510,7 @@ class Parser(Module):
 
         positive_ids, negative_ids = Analysis.to_indices(valid_analyses)
         weights_, links_ = self.link_slow(atom_reprs, atom_mask, d_out, positive_ids, negative_ids)
-
-        weights = [[w.tolist()[0] for w in sent] for sent in weights_]
+        weights = [[atom_match.cpu() for atom_match in va] for va in weights_]
         links = [[link_weights.argmax(dim=-1).tolist()[0] for link_weights in sent] for sent in links_]
         for va, weight, link in zip(valid_analyses, weights, links):
             va.link_weights = weight

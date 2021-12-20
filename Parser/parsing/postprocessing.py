@@ -73,7 +73,8 @@ class TypeParser:
                 raise ParseError(f'Uneven positives and negatives {p}, {n}')
         return remove_polarities(polished), local_atom_set, positive_ids, negative_ids, polish_from_index
 
-    def parse_beam_batch(self, sents: list[str], decoder_output: list[list[Optional[list[list[str]]]]]):
+    def parse_beam_batch(self, sents: list[str], decoder_output: list[list[Optional[list[list[str]]]]]) \
+            -> list[list['Analysis']]:
         ret: list[list[Analysis]] = []
 
         for sent, symbol_seqs in zip(sents, decoder_output):
@@ -101,7 +102,7 @@ class Analysis:
     pos_ids: list[list[int]] = None
     neg_ids: list[list[int]] = None
     idx_to_polish: Dict[int, int] = None
-    link_weights: list[list[list[float]]] = None
+    link_weights: list[Tensor] = None
     axiom_links: Dict[int, int] = None
     traceback: ParseError = None
 
@@ -141,6 +142,14 @@ class Analysis:
         return Analysis(words=words, types=types, polish=polish, axiom_links=axiom_links,
                         pos_ids=pos_ids, neg_ids=neg_ids)
 
+    def pprint_weights(self) -> None:
+        def fit_to_len12(x: str) -> str: return x + ' ' * (12 - len(x))
+        for atom, ws, atom_pos, atom_neg in zip(self.atom_set, self.link_weights, self.pos_ids, self.neg_ids):
+            print(fit_to_len12(str(atom)) + ''.join(map(lambda x: fit_to_len12(str(self.idx_to_polish[x])), atom_pos)))
+            for j, n in enumerate(atom_neg):
+                print(fit_to_len12(str(self.idx_to_polish[n])) + ''.join(map(lambda x: fit_to_len12(f'{ws[x, j]:.2f}'),
+                                                                             range(len(atom_pos)))))
+
 
 def merge_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list[WordType]]:
     def get_word(i: int) -> str:
@@ -156,3 +165,14 @@ def merge_mwus(words: list[str], types: list[WordType]) -> tuple[list[str], list
     words = [w for w in owords if w is not None]
     types = [t for t in types if t != MWU]
     return words, types
+
+
+def hungarian(matrix: Tensor) -> Tensor:
+    """
+    Finds the optimal assignment of rows to columns in the given matrix.
+    :param matrix: A matrix of shape (n, m)
+    :return: A vector of shape (n,) with the row assignment
+    """
+    n, m = matrix.shape
+    row_ind, col_ind = linear_sum_assignment(matrix)
+    return matrix[row_ind, col_ind]
