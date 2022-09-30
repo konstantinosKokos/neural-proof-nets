@@ -4,7 +4,7 @@ click==8.0.1
 filelock==3.0.12
 huggingface-hub==0.0.12
 idna==2.10
-joblib==1.0.1
+joblib==1.2.0
 git+https://github.com/konstantinosKokos/lassy-tlg-extraction.git@0.4.dev4
 numpy==1.22.0
 opt-einsum==3.3.0
