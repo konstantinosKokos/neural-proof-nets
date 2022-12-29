@@ -2,6 +2,9 @@
 ## About
 Code for the paper Neural Proof Nets ([2009.12702](https://arxiv.org/abs/2009.12702)).
 
+## Update 12/2022
+No longer maintained. Follow [spindle](https://github.com/konstantinosKokos/spindle) for updates.
+
 ## Update 19/04/2021
 This branch contains an updated version of the original submission, with many major improvements
 on the output data structures, model architecture and training process.
